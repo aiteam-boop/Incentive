@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../context/AuthContext';
 import api from '../utils/api';
 import { toast } from 'react-toastify';
-import { FiDollarSign, FiClock, FiCheckCircle, FiLogOut, FiRefreshCw, FiX, FiEye, FiCheck } from 'react-icons/fi';
+import { FiDollarSign, FiClock, FiCheckCircle, FiLogOut, FiRefreshCw, FiX, FiEye, FiCheck, FiUser, FiAlertCircle } from 'react-icons/fi';
 
 /* ───── helpers ───── */
 const fmt = (n) => `₹${(n || 0).toLocaleString('en-IN')}`;
@@ -47,6 +47,142 @@ const ApprovalBadge = ({ approved, label, onClick, canClick }) => (
     {label}: {approved ? 'Approved' : 'Pending'}
   </div>
 );
+
+/* ── Pending Approvals Section (Admin/CEO) ── */
+const PendingApprovalsSection = ({ incentives, leads, incMap, userRole, userName, onApproval, onViewDetail }) => {
+  // Get pending incentives that need approval
+  // Both Admin and CEO (who have admin role) can approve both admin and CEO approvals
+  const pendingIncentives = incentives.filter(inc => {
+    if (inc.status === 'Reversed') return false;
+    return !inc.adminApproved || !inc.ceoApproved;
+  });
+
+  if (pendingIncentives.length === 0) {
+    return (
+      <Section title={`🔔 Pending Approvals — ${userName || 'Admin'}`}>
+        <div style={{ padding: 40, textAlign: 'center', color: '#6c757d' }}>
+          <FiCheckCircle size={48} style={{ marginBottom: 12, color: '#00b894' }} />
+          <p style={{ fontSize: 14, fontWeight: 600 }}>No pending approvals</p>
+          <p style={{ fontSize: 12, marginTop: 4 }}>All incentives have been approved</p>
+        </div>
+      </Section>
+    );
+  }
+
+  // Create a map of enquiry codes to leads
+  const leadMap = {};
+  leads.forEach(l => { leadMap[l.enquiryCode] = l; });
+
+  return (
+    <Section title={`🔔 Pending Approvals — ${pendingIncentives.length} ${pendingIncentives.length === 1 ? 'item' : 'items'} (${userName || 'Admin'})`}>
+      <div style={{ overflowX: 'auto' }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+          <thead>
+            <tr style={{ background: '#f8f9fa', borderBottom: '2px solid #e9ecef' }}>
+              <th style={th}>Enquiry Code</th>
+              <th style={th}>Lead Owner</th>
+              <th style={th}>Client Company</th>
+              <th style={th}>Lead Status</th>
+              <th style={th}>Incentive Type</th>
+              <th style={{ ...th, textAlign: 'right' }}>Amount</th>
+              <th style={{ ...th, textAlign: 'center' }}>Admin</th>
+              <th style={{ ...th, textAlign: 'center' }}>CEO</th>
+              <th style={{ ...th, textAlign: 'center' }}>Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {pendingIncentives.map(inc => {
+              const lead = leadMap[inc.enquiryCode];
+              const needsAdminApproval = !inc.adminApproved;
+              const needsCeoApproval = !inc.ceoApproved;
+
+              return (
+                <tr key={inc._id} style={{ borderBottom: '1px solid #f0f0f0' }}>
+                  <td style={{ ...td, fontWeight: 700, color: '#6c5ce7' }}>{inc.enquiryCode}</td>
+                  <td style={{ ...td, display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <FiUser size={14} style={{ color: '#6c757d' }} />
+                    <span style={{ fontWeight: 600 }}>{inc.agentName}</span>
+                  </td>
+                  <td style={td}>{inc.clientCompanyName || '—'}</td>
+                  <td style={td}>
+                    {lead ? (
+                      <StatusBadge status={lead.status || '—'} />
+                    ) : (
+                      <span style={{ color: '#adb5bd' }}>—</span>
+                    )}
+                  </td>
+                  <td style={td}>
+                    <span style={{
+                      padding: '3px 8px', borderRadius: 6, fontSize: 11, fontWeight: 700,
+                      background: inc.incentiveType === 'SQL' ? '#e3f2fd' : inc.incentiveType === 'PO_CONVERSION' ? '#fff3e0' : '#e0cffc',
+                      color: inc.incentiveType === 'SQL' ? '#0984e3' : inc.incentiveType === 'PO_CONVERSION' ? '#f9a825' : '#6c5ce7',
+                    }}>
+                      {inc.incentiveType === 'SQL' ? '✅ SQL' : inc.incentiveType === 'PO_CONVERSION' ? '📦 PO Conversion' : inc.incentiveType === 'CLOSURE' ? '🎯 PO Closure' : inc.incentiveType}
+                    </span>
+                  </td>
+                  <td style={{ ...td, textAlign: 'right', fontWeight: 800, color: '#00b894' }}>{fmt(inc.amount)}</td>
+                  <td style={{ ...td, textAlign: 'center' }}>
+                    {needsAdminApproval ? (
+                      <button
+                        onClick={() => onApproval(inc._id, 'admin', false)}
+                        style={{
+                          padding: '6px 12px', borderRadius: 8, border: 'none', background: '#6c5ce7',
+                          color: '#fff', fontSize: 11, fontWeight: 700, cursor: 'pointer',
+                          display: 'inline-flex', alignItems: 'center', gap: 4,
+                        }}
+                        title="Approve as Admin"
+                      >
+                        <FiCheck size={12} /> Approve
+                      </button>
+                    ) : (
+                      <span style={{ padding: '4px 10px', borderRadius: 8, fontSize: 11, fontWeight: 700, background: '#d4edda', color: '#155724' }}>
+                        <FiCheck size={12} style={{ verticalAlign: 'middle', marginRight: 4 }} /> Approved
+                      </span>
+                    )}
+                  </td>
+                  <td style={{ ...td, textAlign: 'center' }}>
+                    {needsCeoApproval ? (
+                      <button
+                        onClick={() => onApproval(inc._id, 'ceo', false)}
+                        style={{
+                          padding: '6px 12px', borderRadius: 8, border: 'none', background: '#00b894',
+                          color: '#fff', fontSize: 11, fontWeight: 700, cursor: 'pointer',
+                          display: 'inline-flex', alignItems: 'center', gap: 4,
+                        }}
+                        title="Approve as CEO"
+                      >
+                        <FiCheck size={12} /> Approve
+                      </button>
+                    ) : (
+                      <span style={{ padding: '4px 10px', borderRadius: 8, fontSize: 11, fontWeight: 700, background: '#d4edda', color: '#155724' }}>
+                        <FiCheck size={12} style={{ verticalAlign: 'middle', marginRight: 4 }} /> Approved
+                      </span>
+                    )}
+                  </td>
+                  <td style={{ ...td, textAlign: 'center' }}>
+                    <div style={{ display: 'flex', gap: 6, justifyContent: 'center' }}>
+                      <button
+                        onClick={() => onViewDetail(inc.enquiryCode)}
+                        style={{
+                          padding: '6px 10px', borderRadius: 8, border: '1px solid #e9ecef',
+                          background: '#fff', color: '#6c5ce7', fontSize: 11, fontWeight: 600,
+                          cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 4,
+                        }}
+                        title="View Lead Details"
+                      >
+                        <FiEye size={12} /> Details
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </Section>
+  );
+};
 
 /* ═══════ MAIN DASHBOARD ═══════ */
 const Dashboard = () => {
@@ -171,6 +307,19 @@ const Dashboard = () => {
           <StatCard icon={<FiCheckCircle />} label="Total Entries" value={summary.totalEntries} sub="Incentive records" color="#6c5ce7" bg="#f0f0ff" />
         </div>
 
+        {/* ── Pending Approvals Section (Admin/CEO Only) ── */}
+        {isAdmin && (
+          <PendingApprovalsSection
+            incentives={incentives}
+            leads={leads}
+            incMap={incMap}
+            userRole={role}
+            userName={user?.agentName}
+            onApproval={handleApproval}
+            onViewDetail={openDetail}
+          />
+        )}
+
         {/* ── SQL Closure View ── */}
         {(role === 'sql_closure' || isAdmin) && (
           <Section title={isAdmin ? '🔵 SQL Closure Team — PO Incentives (₹1,000/PO)' : '📋 Your PO Incentives (₹1,000 per PO)'}>
@@ -191,7 +340,7 @@ const Dashboard = () => {
         {/* ── SQL Closure: SQL leads without PO ── */}
         {(role === 'sql_closure') && (
           <Section title="📊 Your SQL Leads (Awaiting PO)">
-            <SQLLeadsTable leads={leads.filter(l => !l.poDate)} onViewDetail={openDetail} />
+            <SQLLeadsTable leads={leads.filter(l => !l.poDate && l.status !== 'Lost')} onViewDetail={openDetail} />
           </Section>
         )}
 
