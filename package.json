@@ -1,0 +1,19 @@
+{
+  "name": "incentive-system",
+  "version": "1.0.0",
+  "description": "Incentive Management System - Separate Website, Shared Database",
+  "private": true,
+  "scripts": {
+    "install:backend": "cd backend && npm install",
+    "install:frontend": "cd frontend && npm install",
+    "install:all": "npm run install:backend && npm run install:frontend",
+    "start:backend": "cd backend && npm start",
+    "dev:backend": "cd backend && npm run dev",
+    "start:frontend": "cd frontend && npm start",
+    "build:frontend": "cd frontend && npm run build",
+    "seed": "cd backend && npm run seed",
+    "dev": "npm run dev:backend",
+    "start": "npm run start:backend"
+  }
+}
+
