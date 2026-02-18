@@ -49,11 +49,12 @@ router.get('/data', authenticate, async (req, res) => {
         PO_Date: { $gte: CUTOFF_DATE },
       }).sort({ PO_Date: -1 }).toArray();
 
-      // Also show SQL leads (without PO yet) from Jan 6
+      // Also show SQL leads (without PO yet) from Jan 6, excluding Lost status
       const sqlLeads = await col.find({
         $or: [{ Lead_Owner: agentName }, { Sales_Owner: agentName }],
         SQL_Date: { $gte: CUTOFF_DATE },
         PO_Date: null,
+        Status: { $ne: 'Lost' },
       }).sort({ SQL_Date: -1 }).toArray();
 
       leads = [...leads, ...sqlLeads];
