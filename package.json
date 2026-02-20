@@ -10,10 +10,14 @@
     "start:backend": "cd backend && npm start",
     "dev:backend": "cd backend && npm run dev",
     "start:frontend": "cd frontend && npm start",
+    "build": "cd frontend && npm run build",
     "build:frontend": "cd frontend && npm run build",
     "seed": "cd backend && npm run seed",
-    "dev": "npm run dev:backend",
+    "dev": "concurrently \"npm run dev:backend\" \"npm run start:frontend\"",
+    "dev:all": "concurrently \"npm run dev:backend\" \"npm run start:frontend\"",
     "start": "npm run start:backend"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.1"
   }
 }
-

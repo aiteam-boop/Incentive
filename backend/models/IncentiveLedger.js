@@ -24,6 +24,7 @@ const incentiveLedgerSchema = new mongoose.Schema(
     },
     amount: { type: Number, required: true },
     month: { type: String, required: true }, // Format: YYYY-MM
+    incentive_date: { type: Date }, // Actual date when incentive was earned (SQL_Date or PO_Date from lead)
 
     // Dual approval system
     adminApproved: { type: Boolean, default: false },
