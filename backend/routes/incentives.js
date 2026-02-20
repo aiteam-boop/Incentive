@@ -2,6 +2,7 @@ const express = require('express');
 const IncentiveLedger = require('../models/IncentiveLedger');
 const MonthlyPerformance = require('../models/MonthlyPerformance');
 const Target = require('../models/Target');
+const User = require('../models/User');
 const { authenticate, authorize } = require('../middleware/auth');
 const { getCurrentMonth } = require('../utils/incentiveEngine');
 
@@ -247,10 +248,37 @@ router.post('/recalculate', authenticate, authorize('admin'), async (req, res) =
  */
 router.get('/dashboard', authenticate, async (req, res) => {
   try {
-    const { quarter } = req.query;
-    const userId = req.user._id;
-    const role = req.user.incentive_role;
-    const agentName = req.user.agentName;
+    const { quarter, viewAs } = req.query;
+    let userId = req.user._id;
+    let role = req.user.incentive_role;
+    let agentName = req.user.agentName;
+    let viewAsUser = null;
+    
+    // Check if admin/CEO/Pushpalata wants to view another user's dashboard
+    const isAdmin = role === 'admin';
+    const isCEO = (req.user.agentName || '').toLowerCase().includes('ceo');
+    const isPushpalata = (req.user.agentName || '').toLowerCase().trim() === 'pushpalata';
+    
+    if (viewAs && (isAdmin || isCEO || isPushpalata)) {
+      // Find user by userId or agentName
+      let targetUser;
+      if (viewAs.match(/^[0-9a-fA-F]{24}$/)) {
+        // It's a MongoDB ObjectId
+        targetUser = await User.findById(viewAs).select('-password');
+      } else {
+        // It's an agentName
+        targetUser = await User.findOne({ agentName: viewAs }).select('-password');
+      }
+      
+      if (targetUser && targetUser.incentive_role) {
+        viewAsUser = targetUser;
+        userId = targetUser._id;
+        role = targetUser.incentive_role;
+        agentName = targetUser.agentName;
+      } else {
+        return res.status(404).json({ success: false, message: 'User not found or does not have incentive access' });
+      }
+    }
     
     // SQL Closure team members (by agentName) - even if they have admin role
     // These users should only see PO closure incentives, not SQL incentives
@@ -387,10 +415,15 @@ router.get('/dashboard', authenticate, async (req, res) => {
 
     // Step 7: Get PO incentives table data (for SQL Closure role + Admin overview)
     let poIncentives = [];
-    if (role === 'sql_closure' || role === 'admin') {
+    if (role === 'sql_closure' || role === 'admin' || (isAdmin && viewAs)) {
       // Get PO leads within quarter date range
+      // If viewing a specific user, filter by their agentName
+      const poLeadsFilter = (isAdmin && !viewAs) 
+        ? {} 
+        : { $or: [{ Lead_Owner: agentName }, { Sales_Owner: agentName }] };
+      
       const poLeads = await col.find({
-        $or: role === 'admin' ? [{}] : [{ Lead_Owner: agentName }, { Sales_Owner: agentName }],
+        ...poLeadsFilter,
         PO_Date: {
           $gte: quarterStart,
           $lte: quarterEnd,
@@ -399,19 +432,74 @@ router.get('/dashboard', authenticate, async (req, res) => {
 
       // Get incentives for these leads
       const enquiryCodes = poLeads.map(l => l['Enquiry Code']);
-      let poIncentiveRecords = await IncentiveLedger.find({
-        userId: role === 'admin' ? { $exists: true } : userId,
-        enquiryCode: { $in: enquiryCodes },
+      
+      // Build query for PO incentives
+      let incentiveQuery = {
         incentiveType: 'CLOSURE',
         status: { $ne: 'Reversed' },
         ...getIncentiveDateFilter(),
-      }).sort({ createdAt: -1 });
+      };
+      
+      // If admin viewing own dashboard, get all PO incentives (will include Pushpalata's own)
+      // If viewing specific user, get only that user's incentives
+      // Otherwise, get incentives matching the PO leads enquiry codes
+      if (isAdmin && !viewAs) {
+        // Admin viewing own dashboard: get all PO incentives (not filtered by enquiryCode)
+        // This includes Pushpalata's own incentives + team members' incentives
+        incentiveQuery.userId = { $exists: true };
+      } else if (viewAs) {
+        // Viewing specific user: get only their incentives
+        incentiveQuery.userId = userId;
+        incentiveQuery.enquiryCode = { $in: enquiryCodes };
+      } else {
+        // SQL Closure viewing own dashboard: get their incentives matching PO leads
+        incentiveQuery.userId = userId;
+        incentiveQuery.enquiryCode = { $in: enquiryCodes };
+      }
+      
+      let poIncentiveRecords = await IncentiveLedger.find(incentiveQuery).sort({ createdAt: -1 });
+      
+      // Ensure we have lead data for all incentives (especially for Pushpalata's own incentives)
+      // If an incentive doesn't have a matching lead in poLeads, we still want to include it
+      const allEnquiryCodes = new Set(enquiryCodes);
+      poIncentiveRecords.forEach(inc => {
+        if (inc.enquiryCode && !allEnquiryCodes.has(inc.enquiryCode)) {
+          allEnquiryCodes.add(inc.enquiryCode);
+        }
+      });
+      
+      // Fetch any missing leads for incentives that don't have matching PO leads
+      if (allEnquiryCodes.size > enquiryCodes.length) {
+        const missingCodes = Array.from(allEnquiryCodes).filter(code => !enquiryCodes.includes(code));
+        const missingLeads = await col.find({
+          'Enquiry Code': { $in: missingCodes },
+          PO_Date: {
+            $gte: quarterStart,
+            $lte: quarterEnd,
+          },
+        }).toArray();
+        
+        // Add missing leads to poLeads
+        missingLeads.forEach(l => {
+          poLeads.push(l);
+        });
+      }
 
-      // For Admin/CEO view, only show SQL Closure team members (Gauri, Anjali, Amisha)
-      if (role === 'admin') {
+      // For Admin/CEO view when NOT viewing a specific user:
+      // - If it's CEO viewing, show SQL Closure team members (Gauri, Anjali, Amisha)
+      // - If it's Admin (Pushpalata) viewing own dashboard, include her own incentives + team members for approval sections
+      // But if viewing a specific user, show only that user's incentives
+      if (isAdmin && !viewAs && isCEO) {
+        // CEO viewing: only show SQL Closure team members (excluding CEO and Pushpalata)
         const SQL_CLOSURE_TEAM = ['Gauri', 'gauri', 'Anjali', 'anjali', 'Amisha', 'amisha'];
         poIncentiveRecords = poIncentiveRecords.filter(inc => SQL_CLOSURE_TEAM.includes(inc.agentName));
+      } else if (viewAs) {
+        // When viewing a specific user, filter to only that user's incentives
+        poIncentiveRecords = poIncentiveRecords.filter(inc => inc.userId.toString() === userId.toString());
       }
+      // If admin (Pushpalata) viewing own dashboard (!viewAs && !isCEO), return all PO incentives
+      // Frontend will filter Pushpalata's own incentives in the admin personal section
+      // and show team members' incentives in the approval sections
 
       // Map leads with their incentives
       const leadMap = {};
@@ -466,7 +554,7 @@ router.get('/dashboard', authenticate, async (req, res) => {
       // Limit prospectors strictly to Aparna and Sapna
       const validProspectors = ['Aparna', 'Sapna', 'aparna', 'sapna'];
       const baseFilter = { Lead_Owner: { $in: validProspectors } };
-      const filter = role === 'admin' ? baseFilter : { ...baseFilter, Lead_Owner: agentName };
+      const filter = (isAdmin && !viewAs) ? baseFilter : { ...baseFilter, Lead_Owner: agentName };
       const sqlLeadsData = await col.find({
         ...filter,
         SQL_Date: {
@@ -488,12 +576,17 @@ router.get('/dashboard', authenticate, async (req, res) => {
       const prospectorEnquiryCodes = prospectorLeads.map(l => l.enquiryCode);
       if (prospectorEnquiryCodes.length > 0) {
         prospectorIncentives = await IncentiveLedger.find({
-          userId: role === 'admin' ? { $exists: true } : userId,
+          userId: (isAdmin && !viewAs) ? { $exists: true } : userId,
           enquiryCode: { $in: prospectorEnquiryCodes },
           incentiveType: { $in: ['SQL', 'PO_CONVERSION'] },
           status: { $ne: 'Reversed' },
           ...getIncentiveDateFilter(),
         }).sort({ createdAt: -1 });
+        
+        // If viewing a specific user, filter to only that user's incentives
+        if (viewAs) {
+          prospectorIncentives = prospectorIncentives.filter(inc => inc.userId.toString() === userId.toString());
+        }
       }
     }
 
@@ -553,6 +646,13 @@ router.get('/dashboard', authenticate, async (req, res) => {
       prospector_leads: prospectorLeads,
       prospector_incentives: prospectorIncentives,
       pending_approvals: pendingApprovals,
+      // Include viewAs user info if viewing another user
+      viewAsUser: viewAsUser ? {
+        _id: viewAsUser._id,
+        agentName: viewAsUser.agentName,
+        username: viewAsUser.username,
+        incentive_role: viewAsUser.incentive_role,
+      } : null,
     });
   } catch (error) {
     console.error('Quarterly dashboard error:', error);
