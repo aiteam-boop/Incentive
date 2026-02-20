@@ -230,18 +230,38 @@ const Dashboard = () => {
   });
   const [quarterlyData, setQuarterlyData] = useState(null);
   const [quarterlyLoading, setQuarterlyLoading] = useState(false);
+  
+  // User switching for Admin/CEO
+  const [selectedViewUser, setSelectedViewUser] = useState(null); // null = own dashboard
+  const [usersList, setUsersList] = useState([]);
+  const [loadingUsers, setLoadingUsers] = useState(false);
 
   const role = user?.incentive_role;
   const isAdmin = role === 'admin';
-  const isCEO = user?.agentName && user.agentName.toLowerCase().includes('ceo');
+  const currentAgentName = (user?.agentName || '').trim();
+  const isCEO = currentAgentName.toLowerCase().includes('ceo');
+  const isPushpalata = currentAgentName.toLowerCase() === 'pushpalata';
   // Treat CEO specially by name: CEO should not see their own incentives
-  const isCeo = (user?.agentName || '').toLowerCase().includes('ceo');
+  const isCeo = isCEO;
+  
+  // Check if user should see dropdown (Admin, CEO, or Pushpalata)
+  const shouldShowDropdown = isAdmin || isCEO || isPushpalata;
+  
+  // Get the viewed user's info (if viewing another user's dashboard)
+  const viewedUser = quarterlyData?.viewAsUser;
+  const viewedRole = viewedUser?.incentive_role || role;
+  const viewedAgentName = viewedUser?.agentName || currentAgentName;
+  const viewedIsCEO = (viewedAgentName || '').toLowerCase().includes('ceo');
   
   // SQL Closure team members (by agentName) - even if they have admin role
   // These users should only see PO closure incentives, not SQL incentives
   const SQL_CLOSURE_TEAM = ['Pushpalata', 'pushpalata', 'Anjali', 'anjali', 'Gauri', 'gauri', 'Amisha', 'amisha'];
   const isSQLClosureTeamMember = SQL_CLOSURE_TEAM.includes(user?.agentName);
   const shouldTreatAsSQLClosure = isSQLClosureTeamMember || role === 'sql_closure';
+  
+  // For viewed user
+  const viewedIsSQLClosureTeamMember = SQL_CLOSURE_TEAM.includes(viewedAgentName);
+  const viewedShouldTreatAsSQLClosure = viewedIsSQLClosureTeamMember || viewedRole === 'sql_closure';
 
   const fetchData = useCallback(async () => {
     try {
@@ -254,11 +274,69 @@ const Dashboard = () => {
     }
   }, []);
 
-  const fetchQuarterlyData = useCallback(async (quarter) => {
+  // Fetch users list for admin dropdown
+  // Only show: Anjali, Amisha, Gauri, Pushpalata, CEO, and Sapna
+  const ALLOWED_DROPDOWN_USERS = ['Anjali', 'Amisha', 'Gauri', 'Pushpalata', 'CEO', 'Sapna'];
+  
+  const fetchUsers = useCallback(async () => {
+    if (!shouldShowDropdown) return;
+    
+    setLoadingUsers(true);
+    try {
+      // Fetch all users with incentive roles
+      const res = await api.get('/auth/users');
+      const allUsers = res.data.users || [];
+      
+      // Filter to only allowed users
+      let filteredUsers = allUsers.filter(u => {
+        const agentName = (u.agentName || '').trim();
+        return ALLOWED_DROPDOWN_USERS.some(name => 
+          agentName.toLowerCase() === name.toLowerCase()
+        );
+      });
+      
+      // If Pushpalata is logged in, exclude CEO from the list
+      if (isPushpalata) {
+        filteredUsers = filteredUsers.filter(u => 
+          !(u.agentName || '').toLowerCase().includes('ceo')
+        );
+      }
+      
+      // Also exclude the current user from the dropdown (they can use "My Dashboard")
+      filteredUsers = filteredUsers.filter(u => {
+        const uName = (u.agentName || '').trim().toLowerCase();
+        const currentName = currentAgentName.toLowerCase();
+        return uName !== currentName;
+      });
+      
+      // Sort users in the order: Anjali, Amisha, Gauri, Pushpalata, CEO, Sapna
+      const sortOrder = ['Anjali', 'Amisha', 'Gauri', 'Pushpalata', 'CEO', 'Sapna'];
+      filteredUsers.sort((a, b) => {
+        const aName = (a.agentName || '').trim();
+        const bName = (b.agentName || '').trim();
+        const aIndex = sortOrder.findIndex(name => aName.toLowerCase() === name.toLowerCase());
+        const bIndex = sortOrder.findIndex(name => bName.toLowerCase() === name.toLowerCase());
+        return (aIndex === -1 ? 999 : aIndex) - (bIndex === -1 ? 999 : bIndex);
+      });
+      
+      setUsersList(filteredUsers);
+    } catch (err) {
+      console.error('Failed to load users:', err);
+      toast.error('Failed to load users list');
+    } finally {
+      setLoadingUsers(false);
+    }
+  }, [shouldShowDropdown, isPushpalata, currentAgentName]);
+
+  const fetchQuarterlyData = useCallback(async (quarter, viewAsUserId = null) => {
     if (!quarter) return;
     setQuarterlyLoading(true);
     try {
-      const res = await api.get(`/incentives/dashboard?quarter=${quarter}`);
+      let url = `/incentives/dashboard?quarter=${quarter}`;
+      if (viewAsUserId) {
+        url += `&viewAs=${viewAsUserId}`;
+      }
+      const res = await api.get(url);
       setQuarterlyData(res.data);
     } catch (err) {
       toast.error('Failed to load quarterly data');
@@ -271,9 +349,36 @@ const Dashboard = () => {
   useEffect(() => { fetchData(); }, [fetchData]);
   
   useEffect(() => {
+    if (shouldShowDropdown) {
+      fetchUsers();
+    }
+  }, [shouldShowDropdown, fetchUsers]);
+  
+  useEffect(() => {
     const quarter = `${selectedYear}-${selectedQuarter}`;
-    fetchQuarterlyData(quarter);
-  }, [selectedYear, selectedQuarter, fetchQuarterlyData]);
+    // If viewing CEO's own dashboard (or no selection), don't pass viewAs
+    const viewAsId = (selectedViewUser && (selectedViewUser.agentName || '').toLowerCase().includes('ceo')) 
+      ? null 
+      : (selectedViewUser?._id || selectedViewUser?.agentName || null);
+    fetchQuarterlyData(quarter, viewAsId);
+  }, [selectedYear, selectedQuarter, selectedViewUser, fetchQuarterlyData]);
+  
+  // Handle user selection change
+  const handleUserChange = (e) => {
+    const value = e.target.value;
+    if (value === '') {
+      setSelectedViewUser(null);
+    } else {
+      // Try to find by _id first, then by agentName
+      const selectedUser = usersList.find(u => 
+        u._id === value || 
+        u._id?.toString() === value || 
+        u.agentName === value ||
+        (u.agentName || '').toLowerCase() === value.toLowerCase()
+      );
+      setSelectedViewUser(selectedUser || null);
+    }
+  };
 
   /* sync incentives (admin only) */
   const handleSync = async () => {
@@ -284,7 +389,10 @@ const Dashboard = () => {
       fetchData();
       // Refresh quarterly data
       const quarter = `${selectedYear}-${selectedQuarter}`;
-      fetchQuarterlyData(quarter);
+      const viewAsId = (selectedViewUser && (selectedViewUser.agentName || '').toLowerCase().includes('ceo')) 
+        ? null 
+        : (selectedViewUser?._id || selectedViewUser?.agentName || null);
+      fetchQuarterlyData(quarter, viewAsId);
     } catch (err) {
       toast.error(err.response?.data?.message || 'Sync failed');
     } finally {
@@ -303,7 +411,10 @@ const Dashboard = () => {
       fetchData();
       // Refresh quarterly data
       const quarter = `${selectedYear}-${selectedQuarter}`;
-      fetchQuarterlyData(quarter);
+      const viewAsId = (selectedViewUser && (selectedViewUser.agentName || '').toLowerCase().includes('ceo')) 
+        ? null 
+        : (selectedViewUser?._id || selectedViewUser?.agentName || null);
+      fetchQuarterlyData(quarter, viewAsId);
     } catch (err) {
       toast.error(err.response?.data?.message || 'Action failed');
     }
@@ -370,10 +481,46 @@ const Dashboard = () => {
           <span style={{ fontSize: 20 }}>💰</span>
           <div>
             <h1 style={{ fontSize: 16, fontWeight: 800, margin: 0 }}>Incentive Dashboard</h1>
-            <div style={{ fontSize: 11, opacity: 0.7 }}>{user?.agentName} • <span style={{ color: roleColors[role], fontWeight: 600 }}>{roleLabels[role]}</span></div>
+            <div style={{ fontSize: 11, opacity: 0.7 }}>
+              {quarterlyData?.viewAsUser ? (
+                <>
+                  Viewing: <span style={{ fontWeight: 700 }}>{quarterlyData.viewAsUser.agentName}</span> • {roleLabels[quarterlyData.viewAsUser.incentive_role] || 'User'}
+                </>
+              ) : (
+                <>
+                  {user?.agentName} • <span style={{ color: roleColors[role], fontWeight: 600 }}>{roleLabels[role]}</span>
+                </>
+              )}
+            </div>
           </div>
         </div>
-        <div style={{ display: 'flex', gap: 8 }}>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          {/* User Dropdown for Admin/CEO/Pushpalata */}
+          {shouldShowDropdown && usersList.length > 0 && (
+            <select
+              value={selectedViewUser ? (selectedViewUser._id || selectedViewUser.agentName) : ''}
+              onChange={handleUserChange}
+              style={{
+                padding: '6px 12px',
+                borderRadius: 8,
+                border: '1px solid rgba(255,255,255,0.3)',
+                background: 'rgba(255,255,255,0.95)',
+                color: '#1a1a2e',
+                fontSize: 11,
+                fontWeight: 600,
+                cursor: 'pointer',
+                minWidth: 140,
+                boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
+              }}
+            >
+              <option value="" style={{ color: '#1a1a2e', background: '#fff' }}>My Dashboard</option>
+              {usersList.map((u) => (
+                <option key={u._id || u.agentName} value={u._id || u.agentName} style={{ color: '#1a1a2e', background: '#fff' }}>
+                  {u.agentName}
+                </option>
+              ))}
+            </select>
+          )}
           {isAdmin && (
             <button onClick={handleSync} disabled={syncing} style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '6px 12px', borderRadius: 8, border: 'none', background: 'rgba(255,255,255,0.15)', color: '#fff', fontSize: 11, fontWeight: 600, cursor: 'pointer' }}>
               <FiRefreshCw className={syncing ? 'spin' : ''} size={14} /> {syncing ? 'Syncing...' : 'Sync'}
@@ -442,8 +589,8 @@ const Dashboard = () => {
           )}
         </div>
 
-        {/* ── Performance Snapshot Section (hide only for CEO, admins still see their incentives) ── */}
-        {quarterlyData && !isCeo && (
+        {/* ── Performance Snapshot Section (hide only for CEO, show for viewed user if not CEO) ── */}
+        {quarterlyData && !viewedIsCEO && (
           <div style={{
             background: 'linear-gradient(135deg, #1a1a2e, #16213e)',
             borderRadius: 14,
@@ -560,7 +707,7 @@ const Dashboard = () => {
                   </div>
                 )}
                 {/* Only show SQL Target for Prospector role, not SQL Closure team members */}
-                {quarterlyData.sql_target > 0 && !shouldTreatAsSQLClosure && (
+                {quarterlyData.sql_target > 0 && !viewedShouldTreatAsSQLClosure && (
                   <div style={{ marginTop: 2 }}>
                     SQL Target: {quarterlyData.sql_target} × {fmt(quarterlyData.incentive_per_sql || 300)} = {fmt(quarterlyData.sql_potential || (quarterlyData.sql_target * (quarterlyData.incentive_per_sql || 300)))}
                   </div>
@@ -568,7 +715,7 @@ const Dashboard = () => {
                 {quarterlyData.closure_target > 0 && (
                   <div style={{ marginTop: 2 }}>Closure Target: {quarterlyData.closure_target}</div>
                 )}
-                {(quarterlyData.po_target > 0 || (quarterlyData.sql_target > 0 && !shouldTreatAsSQLClosure)) && (
+                {(quarterlyData.po_target > 0 || (quarterlyData.sql_target > 0 && !viewedShouldTreatAsSQLClosure)) && (
                   <div style={{ marginTop: 4, fontSize: 11, fontWeight: 700, color: '#fff', borderTop: '1px solid rgba(255,255,255,0.2)', paddingTop: 4 }}>
                     Total Potential: {fmt(quarterlyData.target_potential)}
                   </div>
@@ -599,8 +746,8 @@ const Dashboard = () => {
         )}
 
 
-        {/* ── Quarter Summary Cards (hide only for CEO — admins still earn incentives) ── */}
-        {!isCeo && (
+        {/* ── Quarter Summary Cards (hide only for CEO — show for viewed user if not CEO) ── */}
+        {!viewedIsCEO && (
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, marginBottom: 12 }}>
           <StatCard
             icon={<FiDollarSign />} label="Total Earned" value={fmt(summary.totalEarned)}
@@ -612,14 +759,18 @@ const Dashboard = () => {
         </div>
         )}
 
-        {/* ── Admin personal PO incentives (her own closures) ── */}
-        {isAdmin && !isCEO && (
+        {/* ── Admin personal PO incentives (her own closures) — only show when viewing own dashboard ── */}
+        {isAdmin && !isCEO && !viewedUser && (
           <Section title={`📋 Your PO Incentives (₹1,000 per PO) — ${selectedYear} ${selectedQuarter}`}>
             <IncentiveTable
               // For admin, show only her own PO incentives from the quarterly data
               leads={null}
               incentives={(quarterlyData?.po_incentives || []).filter(
-                inc => inc.agentName === user?.agentName
+                inc => {
+                  const incAgentName = (inc.agentName || '').trim().toLowerCase();
+                  const userAgentName = (user?.agentName || '').trim().toLowerCase();
+                  return incAgentName === userAgentName;
+                }
               )}
               incMap={incMap}
               type="CLOSURE"
@@ -632,8 +783,9 @@ const Dashboard = () => {
           </Section>
         )}
 
-        {/* ── Admin approvals: SQL Closure team PO incentives ── */}
-        {isAdmin && !isCEO && (
+        {/* ── Admin approvals: SQL Closure team PO incentives — only show for Admin (Pushpalata), not CEO ── */}
+        {/* CEO sees all data in the "SQL Closure Team — PO Incentives" section below */}
+        {isAdmin && !isCEO && !viewedUser && (
           <Section title={`🔵 SQL Closure Team — Pending PO Approvals — ${selectedYear} ${selectedQuarter}`}>
             <div style={{ overflowX: 'auto' }}>
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
@@ -677,17 +829,35 @@ const Dashboard = () => {
                           </button>
                         </td>
                         <td style={{ ...td, textAlign: 'center' }}>
-                          <span style={{ padding: '4px 10px', borderRadius: 8, fontSize: 11, fontWeight: 700, background: inc.ceoApproved ? '#d4edda' : '#fff3cd', color: inc.ceoApproved ? '#155724' : '#856404' }}>
-                            {inc.ceoApproved ? (
-                              <>
-                                <FiCheck size={12} style={{ verticalAlign: 'middle', marginRight: 4 }} /> Approved
-                              </>
-                            ) : (
-                              <>
-                                <FiClock size={12} style={{ verticalAlign: 'middle', marginRight: 4 }} /> Pending CEO
-                              </>
-                            )}
-                          </span>
+                          {isCEO ? (
+                            // CEO can approve/reject CEO approvals
+                            <button
+                              onClick={() => handleApproval(inc._id, 'ceo', inc.ceoApproved)}
+                              style={{
+                                padding: '6px 12px', borderRadius: 8, border: 'none',
+                                background: inc.ceoApproved ? '#d4edda' : '#fdcb6e',
+                                color: inc.ceoApproved ? '#155724' : '#856404',
+                                fontSize: 11, fontWeight: 700, cursor: 'pointer',
+                                display: 'inline-flex', alignItems: 'center', gap: 4,
+                              }}
+                              title={inc.ceoApproved ? 'Revoke CEO approval' : 'Approve as CEO'}
+                            >
+                              <FiCheck size={12} /> {inc.ceoApproved ? 'Approved' : 'Approve'}
+                            </button>
+                          ) : (
+                            // Admin sees CEO approval status (read-only)
+                            <span style={{ padding: '4px 10px', borderRadius: 8, fontSize: 11, fontWeight: 700, background: inc.ceoApproved ? '#d4edda' : '#fff3cd', color: inc.ceoApproved ? '#155724' : '#856404' }}>
+                              {inc.ceoApproved ? (
+                                <>
+                                  <FiCheck size={12} style={{ verticalAlign: 'middle', marginRight: 4 }} /> Approved
+                                </>
+                              ) : (
+                                <>
+                                  <FiClock size={12} style={{ verticalAlign: 'middle', marginRight: 4 }} /> Pending CEO
+                                </>
+                              )}
+                            </span>
+                          )}
                         </td>
                         <td style={{ ...td, textAlign: 'center' }}>
                           <button
@@ -710,8 +880,8 @@ const Dashboard = () => {
           </Section>
         )}
 
-        {/* ── Admin approvals: Prospector team SQL & PO Conversion ── */}
-        {isAdmin && !isCEO && (
+        {/* ── Admin approvals: Prospector team SQL & PO Conversion — only show when viewing own dashboard ── */}
+        {isAdmin && !isCEO && !viewedUser && (
           <Section title={`🟢 Prospector Team — Pending SQL & PO Conversion — ${selectedYear} ${selectedQuarter}`}>
             <div style={{ overflowX: 'auto' }}>
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
@@ -802,17 +972,18 @@ const Dashboard = () => {
 
         {/* ── SQL Closure View ── */}
         {/* For SQL Closure role: show only their own PO incentives
-            For CEO (admin CEO account): show team SQL Closure incentives
-            For normal admin (e.g. Pushpalata): hide this team card */}
-        {(role === 'sql_closure' || isCeo) && (
-          <Section title={isCeo ? `🔵 SQL Closure Team — PO Incentives (₹1,000/PO) — ${selectedYear} ${selectedQuarter}` : `📋 Your PO Incentives (₹1,000 per PO) — ${selectedYear} ${selectedQuarter}`}>
+            For Admin viewing another user: show that user's PO incentives
+            For Admin viewing own dashboard: hide (already shown in admin personal section above)
+            For CEO: show SQL Closure team PO incentives */}
+        {((viewedRole === 'sql_closure') || (viewedRole === 'admin' && viewedUser) || (isCEO && !viewedUser)) && (
+          <Section title={(isCEO && !viewedUser) ? `🔵 SQL Closure Team — PO Incentives (₹1,000/PO) — ${selectedYear} ${selectedQuarter}` : `📋 Your PO Incentives (₹1,000 per PO) — ${selectedYear} ${selectedQuarter}`}>
             <IncentiveTable
               leads={quarterlyData?.po_incentives ? null : leads.filter(l => l.poDate)}
               incentives={quarterlyData?.po_incentives || null}
               incMap={incMap}
               type="CLOSURE"
               isAdmin={isAdmin}
-              role={role}
+              role={viewedRole}
               onApproval={handleApproval}
               onViewDetail={openDetail}
               showOwner={isCeo}
@@ -823,10 +994,10 @@ const Dashboard = () => {
 
         {/* ── Prospector View ── */}
         {/* For Prospector role: show only their own SQL/PO Conversion incentives
-            For CEO: show Prospector team incentives
-            For normal admin (e.g. Pushpalata): hide this team card */}
-        {(role === 'prospector' || isCeo) && (
-          <Section title={isCeo ? `🟢 Prospector Team — SQL & PO Conversion Incentives — ${selectedYear} ${selectedQuarter}` : `📋 Your SQL Incentives — ${selectedYear} ${selectedQuarter}`}>
+            For Admin (Pushpalata): show Prospector team incentives if not SQL Closure team member
+            For CEO: hide this section (CEO sees SQL Closure approvals instead) */}
+        {(viewedRole === 'prospector' || (viewedRole === 'admin' && !viewedIsSQLClosureTeamMember && !isCEO)) && (
+          <Section title={viewedIsCEO ? `🟢 Prospector Team — SQL & PO Conversion Incentives — ${selectedYear} ${selectedQuarter}` : `📋 Your SQL Incentives — ${selectedYear} ${selectedQuarter}`}>
             <ProspectorTable
               leads={quarterlyData?.prospector_leads || leads.filter(l => l.sqlDate)}
               incentives={quarterlyData?.prospector_leads || null}
@@ -908,6 +1079,7 @@ const Modal = ({ title, onClose, children, wide }) => (
 /* ── SQL Closure incentive table ── */
 const IncentiveTable = ({ leads, incentives, incMap, type, isAdmin, onApproval, onViewDetail, showOwner }) => {
   // If incentives array is provided (from quarterly data), use it directly
+  // Check if we have incentives first, then check leads
   if (incentives && Array.isArray(incentives) && incentives.length > 0) {
     return (
       <div style={{ overflowX: 'auto' }}>
@@ -961,6 +1133,10 @@ const IncentiveTable = ({ leads, incentives, incMap, type, isAdmin, onApproval, 
   }
 
   // Fallback to original leads-based rendering
+  // If we have incentives array but it's empty, show message
+  if (incentives && Array.isArray(incentives) && incentives.length === 0) {
+    return <p style={{ color: '#6c757d', textAlign: 'center', padding: 24 }}>No PO incentives found for this quarter.</p>;
+  }
   if (!leads || !leads.length) return <p style={{ color: '#6c757d', textAlign: 'center', padding: 24 }}>No PO leads found for this quarter.</p>;
   return (
     <div style={{ overflowX: 'auto' }}>
