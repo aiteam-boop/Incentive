@@ -22,6 +22,7 @@ const Layout = () => {
     { path: '/leads', label: 'Leads', icon: <FiTarget />, roles: ['admin', 'prospector', 'sql_closure'] },
     { path: '/my-incentives', label: 'My Incentives', icon: <FiDollarSign />, roles: ['admin', 'prospector', 'sql_closure'] },
     // Admin-only pages
+    { path: '/approvals', label: 'Approvals', icon: <FiCheck />, roles: ['admin'] },
     { path: '/team-incentives', label: 'Team Incentives', icon: <FiUsers />, roles: ['admin'] },
     { path: '/reports', label: 'Reports', icon: <FiBarChart2 />, roles: ['admin'] },
     { path: '/users', label: 'Users', icon: <FiShield />, roles: ['admin'] },

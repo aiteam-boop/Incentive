@@ -42,6 +42,17 @@ export const AuthProvider = ({ children }) => {
     return userData;
   };
 
+  // SSO login with token from Sales OS
+  const ssoLogin = async (ssoToken) => {
+    const res = await api.post('/auth/sso-login', { token: ssoToken });
+    const { token: newToken, user: userData } = res.data;
+    localStorage.setItem('incentive_token', newToken);
+    api.defaults.headers.common['Authorization'] = `Bearer ${newToken}`;
+    setToken(newToken);
+    setUser(userData);
+    return userData;
+  };
+
   const logout = () => {
     localStorage.removeItem('incentive_token');
     delete api.defaults.headers.common['Authorization'];
@@ -56,7 +67,7 @@ export const AuthProvider = ({ children }) => {
   const hasRole = (...roles) => roles.includes(user?.incentive_role);
 
   return (
-    <AuthContext.Provider value={{ user, token, loading, login, logout, fetchUser, getRole, hasRole }}>
+    <AuthContext.Provider value={{ user, token, loading, login, ssoLogin, logout, fetchUser, getRole, hasRole }}>
       {children}
     </AuthContext.Provider>
   );

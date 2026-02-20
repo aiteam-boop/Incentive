@@ -11,6 +11,15 @@ const router = express.Router();
 // Cutoff date — Jan 6, 2026
 const CUTOFF_DATE = new Date('2026-01-06T00:00:00.000Z');
 
+// Valid prospectors for SQL/SQL Closure incentives (only Aparna and Sapna)
+const VALID_PROSPECTORS = ['Aparna', 'Sapna', 'aparna', 'sapna'];
+
+// Helper: check if agent is a valid prospector for SQL incentives
+function isValidProspectorForSQL(agentName) {
+  if (!agentName) return false;
+  return VALID_PROSPECTORS.includes(agentName);
+}
+
 // Helper: get leads_master collection directly
 function getLeadsMaster() {
   return mongoose.connection.db.collection('leads_master');
@@ -204,7 +213,8 @@ router.post('/sync-incentives', authenticate, authorize('admin'), async (req, re
         });
         if (existing) { results.skipped++; continue; }
 
-        const poMonth = lead['PO_Date'] ? formatMonth(new Date(lead['PO_Date'])) : formatMonth(new Date());
+        const poDate = lead['PO_Date'] ? new Date(lead['PO_Date']) : new Date();
+        const poMonth = formatMonth(poDate);
         await IncentiveLedger.create({
           userId: user._id,
           agentName: user.agentName,
@@ -214,6 +224,7 @@ router.post('/sync-incentives', authenticate, authorize('admin'), async (req, re
           incentiveType: 'CLOSURE',
           amount: Math.min(settings.closure_incentive_rate, settings.closure_incentive_cap),
           month: poMonth,
+          incentive_date: poDate,
           description: `PO Incentive: ${lead['Client_Company_Name']} (${enquiryCode})`,
         });
         results.created++;
@@ -224,11 +235,15 @@ router.post('/sync-incentives', authenticate, authorize('admin'), async (req, re
     }
 
     // 2. Process Prospector SQL incentives (₹300 per SQL)
+    // IMPORTANT: Only Aparna and Sapna are considered prospectors for SQL incentives
+    // All other agents (Gauri, Anjali, Amisha, etc.) are excluded from SQL incentives
+    // Note: Pushpalata and Amisha are admins, not eligible for SQL incentives
     const sqlLeads = await col.find({ SQL_Date: { $gte: CUTOFF_DATE } }).toArray();
     for (const lead of sqlLeads) {
       const ownerName = lead['Lead_Owner'];
       const user = userMap[ownerName];
-      if (!user || user.incentive_role !== 'prospector') continue;
+      // Only process if user exists AND is a valid prospector (Aparna or Sapna)
+      if (!user || !isValidProspectorForSQL(user.agentName)) continue;
 
       const enquiryCode = lead['Enquiry Code'];
       try {
@@ -237,7 +252,8 @@ router.post('/sync-incentives', authenticate, authorize('admin'), async (req, re
           enquiryCode, incentiveType: 'SQL', userId: user._id,
         });
         if (!existingSQL) {
-          const sqlMonth = lead['SQL_Date'] ? formatMonth(new Date(lead['SQL_Date'])) : formatMonth(new Date());
+          const sqlDate = lead['SQL_Date'] ? new Date(lead['SQL_Date']) : new Date();
+          const sqlMonth = formatMonth(sqlDate);
           await IncentiveLedger.create({
             userId: user._id,
             agentName: user.agentName,
@@ -247,6 +263,7 @@ router.post('/sync-incentives', authenticate, authorize('admin'), async (req, re
             incentiveType: 'SQL',
             amount: Math.min(settings.sql_incentive_rate, settings.sql_incentive_cap),
             month: sqlMonth,
+            incentive_date: sqlDate,
             description: `SQL Incentive: ${lead['Client_Company_Name']} (${enquiryCode})`,
           });
           results.created++;
@@ -260,7 +277,8 @@ router.post('/sync-incentives', authenticate, authorize('admin'), async (req, re
             enquiryCode, incentiveType: 'PO_CONVERSION', userId: user._id,
           });
           if (!existingPO) {
-            const poMonth = lead['PO_Date'] ? formatMonth(new Date(lead['PO_Date'])) : formatMonth(new Date());
+            const poDate = new Date(lead['PO_Date']);
+            const poMonth = formatMonth(poDate);
             await IncentiveLedger.create({
               userId: user._id,
               agentName: user.agentName,
@@ -270,6 +288,7 @@ router.post('/sync-incentives', authenticate, authorize('admin'), async (req, re
               incentiveType: 'PO_CONVERSION',
               amount: 200, // Fixed ₹200 for PO conversion
               month: poMonth,
+              incentive_date: poDate,
               description: `PO Conversion Bonus: ${lead['Client_Company_Name']} (${enquiryCode})`,
             });
             results.created++;
@@ -300,13 +319,25 @@ router.post('/sync-incentives', authenticate, authorize('admin'), async (req, re
 /**
  * PUT /api/dashboard/approve/:id
  * Admin approves an incentive (as Admin or CEO).
+ * CEO can only approve CEO approvals, and only after admin has approved.
  */
 router.put('/approve/:id', authenticate, authorize('admin'), async (req, res) => {
   try {
     const { approvalType } = req.body; // 'admin' or 'ceo'
+    const isCEO = req.user.agentName && req.user.agentName.toLowerCase().includes('ceo');
     const entry = await IncentiveLedger.findById(req.params.id);
     if (!entry) return res.status(404).json({ success: false, message: 'Incentive not found' });
     if (entry.status === 'Reversed') return res.status(400).json({ success: false, message: 'Cannot approve reversed incentive' });
+
+    // CEO restrictions: Can only approve CEO approvals, and only if admin has already approved
+    if (isCEO) {
+      if (approvalType === 'admin') {
+        return res.status(403).json({ success: false, message: 'CEO cannot approve admin approvals' });
+      }
+      if (approvalType === 'ceo' && !entry.adminApproved) {
+        return res.status(403).json({ success: false, message: 'CEO can only approve after admin has approved' });
+      }
+    }
 
     if (approvalType === 'ceo') {
       entry.ceoApproved = true;
@@ -342,12 +373,19 @@ router.put('/approve/:id', authenticate, authorize('admin'), async (req, res) =>
 /**
  * PUT /api/dashboard/revoke/:id
  * Admin revokes an approval.
+ * CEO cannot revoke admin approvals.
  */
 router.put('/revoke/:id', authenticate, authorize('admin'), async (req, res) => {
   try {
     const { approvalType } = req.body; // 'admin' or 'ceo'
+    const isCEO = req.user.agentName && req.user.agentName.toLowerCase().includes('ceo');
     const entry = await IncentiveLedger.findById(req.params.id);
     if (!entry) return res.status(404).json({ success: false, message: 'Incentive not found' });
+
+    // CEO cannot revoke admin approvals
+    if (isCEO && approvalType === 'admin') {
+      return res.status(403).json({ success: false, message: 'CEO cannot revoke admin approvals' });
+    }
 
     if (approvalType === 'ceo') {
       entry.ceoApproved = false;
