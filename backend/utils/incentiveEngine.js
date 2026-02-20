@@ -37,10 +37,27 @@ async function getAllSettings() {
   return result;
 }
 
+// Valid prospectors for SQL/SQL Closure incentives (only Aparna and Sapna)
+const VALID_PROSPECTORS = ['Aparna', 'Sapna', 'aparna', 'sapna'];
+
+// Helper: check if agent is a valid prospector for SQL incentives
+function isValidProspectorForSQL(agentName) {
+  if (!agentName) return false;
+  return VALID_PROSPECTORS.includes(agentName);
+}
+
 /**
  * Calculate and create Prospector incentive when SQL is verified
+ * IMPORTANT: Only Aparna and Sapna are eligible for SQL incentives
  */
 async function calculateProspectorIncentive(lead, adminUserId) {
+  // Check if the prospector is valid (only Aparna and Sapna)
+  const User = require('../models/User');
+  const prospectorUser = await User.findById(lead.createdByProspector);
+  if (!prospectorUser || !isValidProspectorForSQL(prospectorUser.agentName)) {
+    return { success: false, message: 'Only Aparna and Sapna are eligible for SQL incentives' };
+  }
+
   const month = getCurrentMonth();
 
   // Check for existing non-reversed incentive
