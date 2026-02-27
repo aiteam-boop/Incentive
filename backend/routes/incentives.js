@@ -248,17 +248,17 @@ router.post('/recalculate', authenticate, authorize('admin'), async (req, res) =
  */
 router.get('/dashboard', authenticate, async (req, res) => {
   try {
-    const { quarter, viewAs } = req.query;
+    const { quarter, viewAs, month } = req.query;
     let userId = req.user._id;
     let role = req.user.incentive_role;
     let agentName = req.user.agentName;
     let viewAsUser = null;
-    
+
     // Check if admin/CEO/Pushpalata wants to view another user's dashboard
     const isAdmin = role === 'admin';
     const isCEO = (req.user.agentName || '').toLowerCase().includes('ceo');
     const isPushpalata = (req.user.agentName || '').toLowerCase().trim() === 'pushpalata';
-    
+
     if (viewAs && (isAdmin || isCEO || isPushpalata)) {
       // Find user by userId or agentName
       let targetUser;
@@ -269,7 +269,7 @@ router.get('/dashboard', authenticate, async (req, res) => {
         // It's an agentName
         targetUser = await User.findOne({ agentName: viewAs }).select('-password');
       }
-      
+
       if (targetUser && targetUser.incentive_role) {
         viewAsUser = targetUser;
         userId = targetUser._id;
@@ -279,7 +279,7 @@ router.get('/dashboard', authenticate, async (req, res) => {
         return res.status(404).json({ success: false, message: 'User not found or does not have incentive access' });
       }
     }
-    
+
     // SQL Closure team members (by agentName) - even if they have admin role
     // These users should only see PO closure incentives, not SQL incentives
     const SQL_CLOSURE_TEAM = ['Pushpalata', 'pushpalata', 'Anjali', 'anjali', 'Gauri', 'gauri', 'Amisha', 'amisha'];
@@ -316,24 +316,36 @@ router.get('/dashboard', authenticate, async (req, res) => {
       quarterEnd = new Date(year, 11, 31, 23, 59, 59, 999); // Dec 31
     }
 
+    let filterStart = quarterStart;
+    let filterEnd = quarterEnd;
+
+    if (month) {
+      const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+      const mIdx = monthNames.indexOf(month);
+      if (mIdx !== -1) {
+        filterStart = new Date(year, mIdx, 1);
+        filterEnd = new Date(year, mIdx + 1, 0, 23, 59, 59, 999);
+      }
+    }
+
     // Helper function to get date filter for incentives
     const getIncentiveDateFilter = () => ({
       $or: [
-        { incentive_date: { $gte: quarterStart, $lte: quarterEnd } },
-        { incentive_date: { $exists: false }, createdAt: { $gte: quarterStart, $lte: quarterEnd } },
+        { incentive_date: { $gte: filterStart, $lte: filterEnd } },
+        { incentive_date: { $exists: false }, createdAt: { $gte: filterStart, $lte: filterEnd } },
       ],
     });
 
     // Step 1: Get target for this quarter
     // First try the Target model
     let target = await Target.findOne({ user_id: userId, quarter });
-    
+
     let sql_target = 0;
     let closure_target = 0;
     let po_target = 0;
     let incentive_per_po = 1000;
     let incentive_per_sql = 300;
-    
+
     if (target) {
       // Use Target model data
       sql_target = target.sql_target || 0;
@@ -346,7 +358,7 @@ router.get('/dashboard', authenticate, async (req, res) => {
       const mongoose = require('mongoose');
       const altTargetsCollection = mongoose.connection.db.collection('targets');
       const altTarget = await altTargetsCollection.findOne({ Lead_Owner: agentName });
-      
+
       if (altTarget) {
         // Map alternative structure to our format
         sql_target = altTarget['Quaterly Sql Target'] || 0;
@@ -358,21 +370,43 @@ router.get('/dashboard', authenticate, async (req, res) => {
         incentive_per_sql = 300; // Standard SQL incentive rate
       }
     }
-    
+
     // Calculate target potential
     // For SQL Closure team members: only PO potential (they don't have SQL targets)
     // For Prospector role: PO + SQL potential
     const po_potential = po_target * incentive_per_po;
     let sql_potential = shouldTreatAsSQLClosure ? 0 : (sql_target * incentive_per_sql);
     const target_potential = po_potential + sql_potential;
-    
+
     // For SQL Closure team members, set sql_target to 0 since they don't track SQL targets
     if (shouldTreatAsSQLClosure) {
       sql_target = 0;
       sql_potential = 0;
     }
 
-    // Step 2: Get earned incentives for this quarter (approved by both admin and CEO)
+    // Step 2: Get earned incentives (quarterly & filtered)
+    const allQuarterEarnedIncentives = await IncentiveLedger.find({
+      userId,
+      status: { $ne: 'Reversed' },
+      adminApproved: true,
+      ceoApproved: true,
+      $or: [
+        { incentive_date: { $gte: quarterStart, $lte: quarterEnd } },
+        { incentive_date: { $exists: false }, createdAt: { $gte: quarterStart, $lte: quarterEnd } },
+      ],
+    });
+
+    const monthly_breakdown = { Jan: 0, Feb: 0, Mar: 0, Apr: 0, May: 0, Jun: 0, Jul: 0, Aug: 0, Sep: 0, Oct: 0, Nov: 0, Dec: 0 };
+    const monthNamesData = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    allQuarterEarnedIncentives.forEach(inc => {
+      const d = inc.incentive_date || inc.createdAt;
+      if (d) {
+        const m = d.getMonth();
+        monthly_breakdown[monthNamesData[m]] += inc.amount;
+      }
+    });
+
+    // Determine earned for the current filter (quarter or specific month)
     const earnedIncentives = await IncentiveLedger.find({
       userId,
       status: { $ne: 'Reversed' },
@@ -418,28 +452,28 @@ router.get('/dashboard', authenticate, async (req, res) => {
     if (role === 'sql_closure' || role === 'admin' || (isAdmin && viewAs)) {
       // Get PO leads within quarter date range
       // If viewing a specific user, filter by their agentName
-      const poLeadsFilter = (isAdmin && !viewAs) 
-        ? {} 
+      const poLeadsFilter = (isAdmin && !viewAs)
+        ? {}
         : { $or: [{ Lead_Owner: agentName }, { Sales_Owner: agentName }] };
-      
+
       const poLeads = await col.find({
         ...poLeadsFilter,
         PO_Date: {
-          $gte: quarterStart,
-          $lte: quarterEnd,
+          $gte: filterStart,
+          $lte: filterEnd,
         },
       }).sort({ PO_Date: -1 }).toArray();
 
       // Get incentives for these leads
       const enquiryCodes = poLeads.map(l => l['Enquiry Code']);
-      
+
       // Build query for PO incentives
       let incentiveQuery = {
         incentiveType: 'CLOSURE',
         status: { $ne: 'Reversed' },
         ...getIncentiveDateFilter(),
       };
-      
+
       // If admin viewing own dashboard, get all PO incentives (will include Pushpalata's own)
       // If viewing specific user, get only that user's incentives
       // Otherwise, get incentives matching the PO leads enquiry codes
@@ -456,9 +490,9 @@ router.get('/dashboard', authenticate, async (req, res) => {
         incentiveQuery.userId = userId;
         incentiveQuery.enquiryCode = { $in: enquiryCodes };
       }
-      
+
       let poIncentiveRecords = await IncentiveLedger.find(incentiveQuery).sort({ createdAt: -1 });
-      
+
       // Ensure we have lead data for all incentives (especially for Pushpalata's own incentives)
       // If an incentive doesn't have a matching lead in poLeads, we still want to include it
       const allEnquiryCodes = new Set(enquiryCodes);
@@ -467,18 +501,18 @@ router.get('/dashboard', authenticate, async (req, res) => {
           allEnquiryCodes.add(inc.enquiryCode);
         }
       });
-      
+
       // Fetch any missing leads for incentives that don't have matching PO leads
       if (allEnquiryCodes.size > enquiryCodes.length) {
         const missingCodes = Array.from(allEnquiryCodes).filter(code => !enquiryCodes.includes(code));
         const missingLeads = await col.find({
           'Enquiry Code': { $in: missingCodes },
           PO_Date: {
-            $gte: quarterStart,
-            $lte: quarterEnd,
+            $gte: filterStart,
+            $lte: filterEnd,
           },
         }).toArray();
-        
+
         // Add missing leads to poLeads
         missingLeads.forEach(l => {
           poLeads.push(l);
@@ -531,8 +565,8 @@ router.get('/dashboard', authenticate, async (req, res) => {
       sqlLeads = await col.find({
         $or: [{ Lead_Owner: agentName }, { Sales_Owner: agentName }],
         SQL_Date: {
-          $gte: quarterStart,
-          $lte: quarterEnd,
+          $gte: filterStart,
+          $lte: filterEnd,
         },
         PO_Date: null,
         Status: { $ne: 'Lost' },
@@ -558,8 +592,8 @@ router.get('/dashboard', authenticate, async (req, res) => {
       const sqlLeadsData = await col.find({
         ...filter,
         SQL_Date: {
-          $gte: quarterStart,
-          $lte: quarterEnd,
+          $gte: filterStart,
+          $lte: filterEnd,
         },
       }).sort({ SQL_Date: -1 }).toArray();
 
@@ -582,7 +616,7 @@ router.get('/dashboard', authenticate, async (req, res) => {
           status: { $ne: 'Reversed' },
           ...getIncentiveDateFilter(),
         }).sort({ createdAt: -1 });
-        
+
         // If viewing a specific user, filter to only that user's incentives
         if (viewAs) {
           prospectorIncentives = prospectorIncentives.filter(inc => inc.userId.toString() === userId.toString());
@@ -646,6 +680,7 @@ router.get('/dashboard', authenticate, async (req, res) => {
       prospector_leads: prospectorLeads,
       prospector_incentives: prospectorIncentives,
       pending_approvals: pendingApprovals,
+      monthly_breakdown,
       // Include viewAs user info if viewing another user
       viewAsUser: viewAsUser ? {
         _id: viewAsUser._id,

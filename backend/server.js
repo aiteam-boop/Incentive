@@ -13,18 +13,8 @@ const incentivesRoutes = require('./routes/incentives');
 const app = express();
 
 // Middleware
-const allowedOrigins = [
-  process.env.FRONTEND_URL || 'http://localhost:3000',
-  'http://localhost:3000',
-  'http://localhost:5000',
-  'http://localhost:5500',
-];
 app.use(cors({
-  origin: function (origin, callback) {
-    // Allow requests with no origin (e.g. mobile apps, curl)
-    if (!origin || allowedOrigins.includes(origin)) return callback(null, true);
-    return callback(null, true); // Allow all in production (same-origin via static serve)
-  },
+  origin: "*",
   credentials: true
 }));
 app.use(express.json());
@@ -60,7 +50,7 @@ app.use((err, req, res, next) => {
 });
 
 // Connect to MongoDB & Start Server
-const PORT = process.env.PORT || 5500;
+const PORT = process.env.PORT || 5000;
 
 mongoose
   .connect(process.env.MONGODB_URI)
