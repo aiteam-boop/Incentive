@@ -3,6 +3,7 @@ const IncentiveLedger = require('../models/IncentiveLedger');
 const MonthlyPerformance = require('../models/MonthlyPerformance');
 const Target = require('../models/Target');
 const User = require('../models/User');
+const { getOperationsDb } = require('../config/mongo');
 const { authenticate, authorize } = require('../middleware/auth');
 const { getCurrentMonth } = require('../utils/incentiveEngine');
 
@@ -456,7 +457,7 @@ router.get('/dashboard', authenticate, async (req, res) => {
         ? {}
         : { $or: [{ Lead_Owner: agentName }, { Sales_Owner: agentName }] };
 
-      const poLeads = await col.find({
+      let poLeads = await col.find({
         ...poLeadsFilter,
         PO_Date: {
           $gte: filterStart,
@@ -519,6 +520,53 @@ router.get('/dashboard', authenticate, async (req, res) => {
         });
       }
 
+      // --- MANUAL CROSS-DATABASE JOIN FOR STAGE 1 & 6 ---
+      // Extract enquiry codes from leads
+      const allPoEnquiryCodes = poLeads.map(l => l['Enquiry Code']).filter(Boolean);
+
+      const opsDb = await getOperationsDb();
+
+      const stage1Docs = await opsDb.collection('stage1_data').find({
+        'Sales Enquiry Code': { $in: allPoEnquiryCodes }
+      }).project({ 'Sales Enquiry Code': 1, 'Order Received Number': 1 }).toArray();
+
+      const orderNoMapByEnquiry = {};
+      const orderNumbers = [];
+      stage1Docs.forEach(d => {
+        const eq = d['Sales Enquiry Code'];
+        const orderNo = d['Order Received Number'];
+        if (eq && orderNo) {
+          orderNoMapByEnquiry[eq] = orderNo;
+          orderNumbers.push(orderNo);
+        }
+      });
+
+      const stage6Docs = await opsDb.collection('stage6_data').find({
+        'Order Received Number': { $in: orderNumbers }
+      }).project({ 'Order Received Number': 1, 'PI_number': 1 }).toArray();
+
+      const piMapByOrderNo = {};
+      stage6Docs.forEach(d => {
+        const orderNo = d['Order Received Number'];
+        const piNumber = d['PI_number'];
+        if (orderNo && piNumber) {
+          piMapByOrderNo[orderNo] = piNumber;
+        }
+      });
+
+      // Map back
+      poLeads = poLeads.map(l => {
+        const eqCode = l['Enquiry Code'];
+        const orderRecvNo = orderNoMapByEnquiry[eqCode];
+        const piNum = orderRecvNo ? piMapByOrderNo[orderRecvNo] : null;
+        return {
+          ...l,
+          orderReceivedNumber: orderRecvNo || 'Not Available',
+          piNumber: piNum || 'Not Available'
+        };
+      });
+      // --- END MANUAL JOIN ---
+
       // For Admin/CEO view when NOT viewing a specific user:
       // - If it's CEO viewing, show SQL Closure team members (Gauri, Anjali, Amisha)
       // - If it's Admin (Pushpalata) viewing own dashboard, include her own incentives + team members for approval sections
@@ -547,6 +595,8 @@ router.get('/dashboard', authenticate, async (req, res) => {
           poDate: l['PO_Date'],
           poValue: l['PO_Value'],
           poNumber: l['PO_Number'],
+          orderReceivedNumber: l.orderReceivedNumber,
+          piNumber: l.piNumber,
         };
       });
 
