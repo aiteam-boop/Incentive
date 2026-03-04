@@ -3,7 +3,8 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import api from '../utils/api';
 import { toast } from 'react-toastify';
-import { FiDollarSign, FiClock, FiCheckCircle, FiLogOut, FiRefreshCw, FiX, FiEye, FiCheck, FiUser, FiAlertCircle, FiTrendingUp } from 'react-icons/fi';
+import { FiDollarSign, FiClock, FiCheckCircle, FiLogOut, FiRefreshCw, FiX, FiEye, FiCheck, FiUser, FiAlertCircle, FiTrendingUp, FiTarget } from 'react-icons/fi';
+import TargetManagementModal from '../components/TargetManagementModal';
 
 /* ───── helpers ───── */
 const fmt = (n) => `₹${(n || 0).toLocaleString('en-IN')}`;
@@ -218,6 +219,7 @@ const Dashboard = () => {
   const [showBreakdown, setShowBreakdown] = useState(false);
   const [detailLead, setDetailLead] = useState(null);
   const [detailLoading, setDetailLoading] = useState(false);
+  const [showTargetModal, setShowTargetModal] = useState(false);
 
   // Quarter selection state (lock year to 2026 for now)
   const [selectedYear, setSelectedYear] = useState(2026);
@@ -544,6 +546,11 @@ const Dashboard = () => {
 
   return (
     <div style={{ height: '100vh', overflow: 'hidden', background: '#f5f6fa', display: 'flex', flexDirection: 'column' }}>
+      {/* Target Management Modal */}
+      <TargetManagementModal
+        isOpen={showTargetModal}
+        onClose={() => setShowTargetModal(false)}
+      />
       {/* ── header ── */}
       <div style={{ background: 'linear-gradient(135deg, #1a1a2e, #16213e)', color: '#fff', padding: '12px 20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
@@ -593,6 +600,11 @@ const Dashboard = () => {
           {isAdmin && (
             <button onClick={handleSync} disabled={syncing} style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '6px 12px', borderRadius: 8, border: 'none', background: 'rgba(255,255,255,0.15)', color: '#fff', fontSize: 11, fontWeight: 600, cursor: 'pointer' }}>
               <FiRefreshCw className={syncing ? 'spin' : ''} size={14} /> {syncing ? 'Syncing...' : 'Sync'}
+            </button>
+          )}
+          {isAdmin && (
+            <button onClick={() => setShowTargetModal(true)} style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '6px 12px', borderRadius: 8, border: 'none', background: 'rgba(108,92,231,0.3)', color: '#fff', fontSize: 11, fontWeight: 600, cursor: 'pointer' }}>
+              <FiTarget size={14} /> Manage Targets
             </button>
           )}
           <button onClick={() => { logout(); window.location.href = '/login'; }} style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '6px 12px', borderRadius: 8, border: 'none', background: 'rgba(225,112,85,0.2)', color: '#e17055', fontSize: 11, fontWeight: 600, cursor: 'pointer' }}>
