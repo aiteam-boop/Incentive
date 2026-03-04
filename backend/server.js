@@ -9,6 +9,7 @@ const authRoutes = require('./routes/auth');
 const dashboardRoutes = require('./routes/dashboard');
 const adminRoutes = require('./routes/admin');
 const incentivesRoutes = require('./routes/incentives');
+const { startOperationsAutoSync } = require('./sync/googleSheetsSync');
 
 const app = express();
 
@@ -56,6 +57,14 @@ mongoose
   .connect(process.env.MONGODB_URI)
   .then(() => {
     console.log('✅ Connected to MongoDB (sales_crm database)');
+
+    // Start the automatic sync for Operations database
+    try {
+      startOperationsAutoSync('*/10 * * * *');
+    } catch (syncErr) {
+      console.error('❌ Failed to initialize Operations Auto Sync:', syncErr.message);
+    }
+
     app.listen(PORT, () => {
       console.log(`🚀 Incentive System Backend running on port ${PORT}`);
       console.log(`🌐 Serving frontend from: ${frontendBuildPath}`);

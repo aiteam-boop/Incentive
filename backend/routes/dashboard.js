@@ -4,6 +4,7 @@ const IncentiveLedger = require('../models/IncentiveLedger');
 const User = require('../models/User');
 const AuditLog = require('../models/AuditLog');
 const Settings = require('../models/Settings');
+const { getOperationsDb } = require('../config/mongo');
 const { authenticate, authorize } = require('../middleware/auth');
 
 const router = express.Router();
@@ -55,7 +56,7 @@ router.get('/data', authenticate, async (req, res) => {
       // SQL Closure: Show leads where Lead_Owner OR Sales_Owner matches, with PO from Jan 6
       leads = await col.find({
         $or: [{ Lead_Owner: agentName }, { Sales_Owner: agentName }],
-        PO_Date: { $gte: CUTOFF_DATE },
+        PO_Date: { $gte: CUTOFF_DATE }
       }).sort({ PO_Date: -1 }).toArray();
 
       // Also show SQL leads (without PO yet) from Jan 6, excluding Lost status
@@ -63,7 +64,7 @@ router.get('/data', authenticate, async (req, res) => {
         $or: [{ Lead_Owner: agentName }, { Sales_Owner: agentName }],
         SQL_Date: { $gte: CUTOFF_DATE },
         PO_Date: null,
-        Status: { $ne: 'Lost' },
+        Status: { $ne: 'Lost' }
       }).sort({ SQL_Date: -1 }).toArray();
 
       leads = [...leads, ...sqlLeads];
@@ -75,7 +76,7 @@ router.get('/data', authenticate, async (req, res) => {
       // Prospector: Show their SQL leads from Jan 6
       leads = await col.find({
         Lead_Owner: agentName,
-        SQL_Date: { $gte: CUTOFF_DATE },
+        SQL_Date: { $gte: CUTOFF_DATE }
       }).sort({ SQL_Date: -1 }).toArray();
 
       // Get incentives for this user
@@ -83,14 +84,8 @@ router.get('/data', authenticate, async (req, res) => {
 
     } else if (role === 'admin') {
       // Admin: all SQL and PO leads from Jan 6
-      const poLeads = await col.find({
-        PO_Date: { $gte: CUTOFF_DATE },
-      }).sort({ PO_Date: -1 }).toArray();
-
-      const sqlOnlyLeads = await col.find({
-        SQL_Date: { $gte: CUTOFF_DATE },
-        PO_Date: null,
-      }).sort({ SQL_Date: -1 }).toArray();
+      const poLeads = await col.find({ PO_Date: { $gte: CUTOFF_DATE } }).sort({ PO_Date: -1 }).toArray();
+      const sqlOnlyLeads = await col.find({ SQL_Date: { $gte: CUTOFF_DATE }, PO_Date: null }).sort({ SQL_Date: -1 }).toArray();
 
       leads = [...poLeads, ...sqlOnlyLeads];
 
@@ -98,6 +93,58 @@ router.get('/data', authenticate, async (req, res) => {
       allIncentives = await IncentiveLedger.find({}).sort({ createdAt: -1 });
       incentives = allIncentives;
     }
+
+    // --- MANUAL CROSS-DATABASE JOIN FOR STAGE 1 & 6 ---
+    // Extract enquiry codes from leads
+    const enquiryCodes = leads.map(l => l['Enquiry Code']).filter(Boolean);
+
+    // Connect to operations DB
+    const opsDb = await getOperationsDb();
+
+    // 1. Fetch stage1_data matches
+    const stage1Docs = await opsDb.collection('stage1_data').find({
+      'Sales Enquiry Code': { $in: enquiryCodes }
+    }).project({ 'Sales Enquiry Code': 1, 'Order Received Number': 1 }).toArray();
+
+    // Dictionary mapping Enquiry Code -> Order Received Number
+    const orderNoMapByEnquiry = {};
+    const orderNumbers = [];
+    stage1Docs.forEach(d => {
+      const eq = d['Sales Enquiry Code'];
+      const orderNo = d['Order Received Number'];
+      if (eq && orderNo) {
+        orderNoMapByEnquiry[eq] = orderNo;
+        orderNumbers.push(orderNo);
+      }
+    });
+
+    // 2. Fetch stage6_data matches
+    const stage6Docs = await opsDb.collection('stage6_data').find({
+      'Order Received Number': { $in: orderNumbers }
+    }).project({ 'Order Received Number': 1, 'PI_number': 1 }).toArray();
+
+    // Dictionary mapping Order Received Number -> PI Number
+    const piMapByOrderNo = {};
+    stage6Docs.forEach(d => {
+      const orderNo = d['Order Received Number'];
+      const piNumber = d['PI_number'];
+      if (orderNo && piNumber) {
+        piMapByOrderNo[orderNo] = piNumber;
+      }
+    });
+
+    // 3. Attach back to leads
+    leads = leads.map(l => {
+      const eqCode = l['Enquiry Code'];
+      const orderRecvNo = orderNoMapByEnquiry[eqCode];
+      const piNum = orderRecvNo ? piMapByOrderNo[orderRecvNo] : null;
+      return {
+        ...l,
+        orderReceivedNumber: orderRecvNo || 'Not Available',
+        piNumber: piNum || 'Not Available'
+      };
+    });
+    // --- END MANUAL JOIN ---
 
     // Calculate earnings summary
     const myIncentives = role === 'admin'
@@ -172,6 +219,8 @@ router.get('/data', authenticate, async (req, res) => {
         expectedClosure: l['Expected_Closure'],
         lostDate: l['Lost_Date'],
         orderNumber: l['Order _Number'],
+        orderReceivedNumber: l.orderReceivedNumber || 'Not Available',
+        piNumber: l.piNumber || 'Not Available',
       })),
       incentives,
       summary,
