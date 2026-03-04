@@ -9,6 +9,7 @@ const authRoutes = require('./routes/auth');
 const dashboardRoutes = require('./routes/dashboard');
 const adminRoutes = require('./routes/admin');
 const incentivesRoutes = require('./routes/incentives');
+const targetsRoutes = require('./routes/targets');
 const { startOperationsAutoSync } = require('./sync/googleSheetsSync');
 
 const app = express();
@@ -26,6 +27,7 @@ app.use('/api/auth', authRoutes);
 app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/incentives', incentivesRoutes);
+app.use('/api/targets', targetsRoutes);
 
 // Health check
 app.get('/api/health', (req, res) => {

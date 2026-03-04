@@ -338,7 +338,7 @@ router.get('/dashboard', authenticate, async (req, res) => {
     });
 
     // Step 1: Get target for this quarter
-    // First try the Target model
+    // Priority 1: Try the strongly-typed Target Mongoose model (user_id + quarter)
     let target = await Target.findOne({ user_id: userId, quarter });
 
     let sql_target = 0;
@@ -355,20 +355,33 @@ router.get('/dashboard', authenticate, async (req, res) => {
       incentive_per_po = target.incentive_per_po || 1000;
       incentive_per_sql = target.incentive_per_sql || 300;
     } else {
-      // Try alternative target collection structure (using Lead_Owner)
+      // Priority 2: Try the raw 'targets' collection (imported sheet data with Lead_Owner key)
       const mongoose = require('mongoose');
       const altTargetsCollection = mongoose.connection.db.collection('targets');
       const altTarget = await altTargetsCollection.findOne({ Lead_Owner: agentName });
 
       if (altTarget) {
-        // Map alternative structure to our format
-        sql_target = altTarget['Quaterly Sql Target'] || 0;
-        closure_target = altTarget['Quaterly Closure Target'] || 0;
-        po_target = altTarget['Quaterly Po Target'] || 0;
-        // For incentive calculation, ALWAYS use configured closure incentive rate (₹1,000 per PO by design)
-        // Monthly Price in this collection represents revenue targets, NOT incentive per PO.
+        // ── target_update_history LOGIC ──
+        // If admin has made updates, they are stored in target_update_history array.
+        // RULE: Use the LAST element if the array exists and has entries.
+        //       Otherwise fall back to root-level imported sheet fields.
+        const hasHistory =
+          Array.isArray(altTarget.target_update_history) &&
+          altTarget.target_update_history.length > 0;
+
+        const effectiveTarget = hasHistory
+          ? altTarget.target_update_history[altTarget.target_update_history.length - 1]
+          : altTarget;
+
+        // Map effective values — note: original imported fields are NEVER modified
+        sql_target = effectiveTarget['Quaterly Sql Target'] ?? altTarget['Quaterly Sql Target'] ?? 0;
+        closure_target = effectiveTarget['Quaterly Closure Target'] ?? altTarget['Quaterly Closure Target'] ?? 0;
+        po_target = effectiveTarget['Quaterly Po Target'] ?? altTarget['Quaterly Po Target'] ?? 0;
+
+        // For incentive calculation: ALWAYS use configured rate (₹1,000 per PO)
+        // Monthly Price represents revenue targets, NOT incentive per PO.
         incentive_per_po = 1000;
-        incentive_per_sql = 300; // Standard SQL incentive rate
+        incentive_per_sql = 300;
       }
     }
 

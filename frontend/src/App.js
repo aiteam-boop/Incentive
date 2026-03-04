@@ -9,6 +9,7 @@ import Dashboard from './pages/Dashboard';
 import Login from './pages/Login';
 import SSOLogin from './pages/SSOLogin';
 import Approvals from './pages/ApprovalsGrouped';
+import AdminTargets from './pages/AdminTargets';
 
 const ProtectedRoute = ({ children }) => {
   const { user, loading } = useAuth();
@@ -25,6 +26,7 @@ function AppRoutes() {
       <Route path="/sso-login" element={<SSOLogin />} />
       <Route path="/" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
       <Route path="/approvals" element={<ProtectedRoute><Approvals /></ProtectedRoute>} />
+      <Route path="/admin/targets" element={<ProtectedRoute><AdminTargets /></ProtectedRoute>} />
       <Route path="*" element={<Navigate to="/" />} />
     </Routes>
   );
