@@ -9,8 +9,20 @@ import TargetManagementModal from '../components/TargetManagementModal';
 /* ───── helpers ───── */
 const fmt = (n) => `₹${(n || 0).toLocaleString('en-IN')}`;
 const fmtDate = (d) => d ? new Date(d).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '—';
-const roleLabels = { admin: 'Admin', prospector: 'Prospector', sql_closure: 'SQL Closure' };
-const roleColors = { admin: '#6c5ce7', prospector: '#00b894', sql_closure: '#0984e3' };
+const roleLabels = { 
+  admin: 'Admin', 
+  prospector: 'Prospector', 
+  sql_closure: 'SQL Closure',
+  inbound: 'Inbound Team',
+  outbound: 'Outbound Team' 
+};
+const roleColors = { 
+  admin: '#6c5ce7', 
+  prospector: '#00b894', 
+  sql_closure: '#0984e3',
+  inbound: '#fdcb6e',
+  outbound: '#e17055' 
+};
 
 /* ───── stat card ───── */
 const StatCard = ({ icon, label, value, sub, color, bg, onClick }) => (
@@ -51,7 +63,7 @@ const ApprovalBadge = ({ approved, label, onClick, canClick }) => (
 );
 
 /* ── Pending Approvals Section (Admin/CEO) ── */
-const PendingApprovalsSection = ({ incentives, leads, incMap, userRole, userName, isCEO, onApproval, onViewDetail }) => {
+const PendingApprovalsSection = ({ incentives, leads, incMap, userRole, userName, isCEO, onApproval, onViewDetail, title }) => {
   // Get pending incentives that need approval
   // For CEO: only show items where admin has approved but CEO hasn't
   // For Admin: show all pending items
@@ -66,7 +78,7 @@ const PendingApprovalsSection = ({ incentives, leads, incMap, userRole, userName
 
   if (pendingIncentives.length === 0) {
     return (
-      <Section title={`🔔 Pending Approvals — ${userName || 'Admin'}`}>
+      <Section title={title || `🔔 Pending Approvals — ${userName || 'Admin'}`}>
         <div style={{ padding: 40, textAlign: 'center', color: '#6c757d' }}>
           <FiCheckCircle size={48} style={{ marginBottom: 12, color: '#00b894' }} />
           <p style={{ fontSize: 14, fontWeight: 600 }}>No pending approvals</p>
@@ -81,7 +93,7 @@ const PendingApprovalsSection = ({ incentives, leads, incMap, userRole, userName
   leads.forEach(l => { leadMap[l.enquiryCode] = l; });
 
   return (
-    <Section title={`🔔 Pending Approvals — ${pendingIncentives.length} ${pendingIncentives.length === 1 ? 'item' : 'items'} (${userName || 'Admin'})`}>
+    <Section title={title || `🔔 Pending Approvals — ${pendingIncentives.length} ${pendingIncentives.length === 1 ? 'item' : 'items'} (${userName || 'Admin'})`}>
       <div style={{ overflowX: 'auto' }}>
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
           <thead>
@@ -89,9 +101,13 @@ const PendingApprovalsSection = ({ incentives, leads, incMap, userRole, userName
               <th style={th}>Enquiry Code</th>
               <th style={th}>Lead Owner</th>
               <th style={th}>Client Company</th>
-              <th style={th}>Lead Status</th>
-              <th style={th}>Incentive Type</th>
-              <th style={{ ...th, textAlign: 'right' }}>Amount</th>
+              <th style={th}>Order Recv No</th>
+              <th style={th}>PI Number</th>
+              <th style={{ ...th, textAlign: 'center' }}>PO Date</th>
+              <th style={{ ...th, textAlign: 'right' }}>PO Value</th>
+              <th style={th}>PO Number</th>
+              <th style={th}>Type</th>
+              <th style={{ ...th, textAlign: 'right' }}>Incentive</th>
               <th style={{ ...th, textAlign: 'center' }}>Admin</th>
               <th style={{ ...th, textAlign: 'center' }}>CEO</th>
               <th style={{ ...th, textAlign: 'center' }}>Actions</th>
@@ -111,20 +127,21 @@ const PendingApprovalsSection = ({ incentives, leads, incMap, userRole, userName
                     <span style={{ fontWeight: 600 }}>{inc.agentName}</span>
                   </td>
                   <td style={td}>{inc.clientCompanyName || '—'}</td>
-                  <td style={td}>
-                    {lead ? (
-                      <StatusBadge status={lead.status || '—'} />
-                    ) : (
-                      <span style={{ color: '#adb5bd' }}>—</span>
-                    )}
-                  </td>
+                  
+                  {/* Operations Data */}
+                  <td style={{ ...td, color: '#6c757d', fontSize: 11 }}>{lead?.orderReceivedNumber || '—'}</td>
+                  <td style={{ ...td, color: '#6c757d', fontSize: 11 }}>{lead?.piNumber || '—'}</td>
+                  <td style={{ ...td, textAlign: 'center' }}>{fmtDate(lead?.poDate || inc.incentive_date)}</td>
+                  <td style={{ ...td, textAlign: 'right', fontWeight: 600 }}>{lead?.poValue ? fmt(lead.poValue) : '—'}</td>
+                  <td style={{ ...td, color: '#6c757d', fontSize: 11 }}>{lead?.poNumber || '—'}</td>
+
                   <td style={td}>
                     <span style={{
                       padding: '3px 8px', borderRadius: 6, fontSize: 11, fontWeight: 700,
                       background: inc.incentiveType === 'SQL' ? '#e3f2fd' : inc.incentiveType === 'PO_CONVERSION' ? '#fff3e0' : '#e0cffc',
                       color: inc.incentiveType === 'SQL' ? '#0984e3' : inc.incentiveType === 'PO_CONVERSION' ? '#f9a825' : '#6c5ce7',
                     }}>
-                      {inc.incentiveType === 'SQL' ? '✅ SQL' : inc.incentiveType === 'PO_CONVERSION' ? '📦 PO Conversion' : inc.incentiveType === 'CLOSURE' ? '🎯 PO Closure' : inc.incentiveType}
+                      {inc.incentiveType === 'SQL' ? 'SQL' : inc.incentiveType === 'PO_CONVERSION' ? 'Conv.' : inc.incentiveType === 'CLOSURE' ? 'Closure' : inc.incentiveType}
                     </span>
                   </td>
                   <td style={{ ...td, textAlign: 'right', fontWeight: 800, color: '#00b894' }}>{fmt(inc.amount)}</td>
@@ -136,13 +153,14 @@ const PendingApprovalsSection = ({ incentives, leads, incMap, userRole, userName
                         </span>
                       ) : onApproval ? (
                         <button
-                          onClick={() => onApproval(inc._id, 'admin', false)}
+                          onClick={() => inc._id ? onApproval(inc._id, 'admin', false) : toast.info('Please Sync this lead first')}
+                          disabled={!inc._id}
                           style={{
-                            padding: '6px 12px', borderRadius: 8, border: 'none', background: '#6c5ce7',
-                            color: '#fff', fontSize: 11, fontWeight: 700, cursor: 'pointer',
+                            padding: '6px 12px', borderRadius: 8, border: 'none', background: !inc._id ? '#adb5bd' : '#6c5ce7',
+                            color: '#fff', fontSize: 11, fontWeight: 700, cursor: !inc._id ? 'not-allowed' : 'pointer',
                             display: 'inline-flex', alignItems: 'center', gap: 4,
                           }}
-                          title="Approve as Admin"
+                          title={!inc._id ? "Please click Sync in the header first to create this incentive" : "Approve as Admin"}
                         >
                           <FiCheck size={12} /> Approve
                         </button>
@@ -161,15 +179,15 @@ const PendingApprovalsSection = ({ incentives, leads, incMap, userRole, userName
                     {needsCeoApproval ? (
                       onApproval && (!isCEO || inc.adminApproved) ? (
                         <button
-                          onClick={() => onApproval(inc._id, 'ceo', false)}
-                          disabled={isCEO && !inc.adminApproved}
+                          onClick={() => inc._id ? onApproval(inc._id, 'ceo', false) : toast.info('Please Sync this lead first')}
+                          disabled={!inc._id || (isCEO && !inc.adminApproved)}
                           style={{
-                            padding: '6px 12px', borderRadius: 8, border: 'none', background: isCEO && !inc.adminApproved ? '#adb5bd' : '#00b894',
-                            color: '#fff', fontSize: 11, fontWeight: 700, cursor: (isCEO && !inc.adminApproved) ? 'not-allowed' : 'pointer',
+                            padding: '6px 12px', borderRadius: 8, border: 'none', background: (!inc._id || (isCEO && !inc.adminApproved)) ? '#adb5bd' : '#00b894',
+                            color: '#fff', fontSize: 11, fontWeight: 700, cursor: (!inc._id || (isCEO && !inc.adminApproved)) ? 'not-allowed' : 'pointer',
                             display: 'inline-flex', alignItems: 'center', gap: 4,
-                            opacity: (isCEO && !inc.adminApproved) ? 0.6 : 1,
+                            opacity: (!inc._id || (isCEO && !inc.adminApproved)) ? 0.6 : 1,
                           }}
-                          title={isCEO && !inc.adminApproved ? 'Wait for Admin approval first' : 'Approve as CEO'}
+                          title={!inc._id ? "Please click Sync in the header first" : (isCEO && !inc.adminApproved ? 'Wait for Admin approval first' : 'Approve as CEO')}
                         >
                           <FiCheck size={12} /> Approve
                         </button>
@@ -233,59 +251,9 @@ const Dashboard = () => {
   const [selectedMonth, setSelectedMonth] = useState(''); // '' means no specific month (all quarter)
   const [quarterlyData, setQuarterlyData] = useState(null);
   const [quarterlyLoading, setQuarterlyLoading] = useState(false);
-  // Full Calculator State
-  const [calcDisplay, setCalcDisplay] = useState('0');
-  const [calcPrev, setCalcPrev] = useState(null);
-  const [calcOp, setCalcOp] = useState(null);
-  const [calcWait, setCalcWait] = useState(false);
 
-  const computeCalc = (a, b, op) => {
-    if (op === '+') return a + b;
-    if (op === '-') return a - b;
-    if (op === '×') return a * b;
-    if (op === '÷') return b === 0 ? 0 : a / b;
-    return b;
-  };
 
-  const handleCalcClick = (val) => {
-    if (val === 'AC') {
-      setCalcDisplay('0'); setCalcPrev(null); setCalcOp(null); setCalcWait(false); return;
-    }
-    if (val === '+/-') {
-      setCalcDisplay(String(parseFloat(calcDisplay) * -1)); return;
-    }
-    if (val === '%') {
-      setCalcDisplay(String(parseFloat(calcDisplay) / 100)); return;
-    }
-    if (['+', '-', '×', '÷'].includes(val)) {
-      if (calcOp && !calcWait && calcPrev !== null) {
-        const computed = computeCalc(calcPrev, parseFloat(calcDisplay), calcOp);
-        setCalcDisplay(String(computed));
-        setCalcPrev(computed);
-      } else {
-        setCalcPrev(parseFloat(calcDisplay));
-      }
-      setCalcOp(val);
-      setCalcWait(true);
-      return;
-    }
-    if (val === '=') {
-      if (calcOp && calcPrev !== null) {
-        const computed = computeCalc(calcPrev, parseFloat(calcDisplay), calcOp);
-        setCalcDisplay(String(computed));
-        setCalcPrev(null);
-        setCalcOp(null);
-        setCalcWait(true);
-      }
-      return;
-    }
-    if (calcWait) {
-      setCalcDisplay(val === '.' ? '0.' : val);
-      setCalcWait(false);
-    } else {
-      setCalcDisplay(calcDisplay === '0' && val !== '.' ? val : calcDisplay + val);
-    }
-  };
+
 
   const quarterMonths = {
     Q1: ['Jan', 'Feb', 'Mar'],
@@ -550,6 +518,13 @@ const Dashboard = () => {
       <TargetManagementModal
         isOpen={showTargetModal}
         onClose={() => setShowTargetModal(false)}
+        onSaved={() => {
+          const quarter = `${selectedYear}-${selectedQuarter}`;
+          const viewAsId = (selectedViewUser && (selectedViewUser.agentName || '').toLowerCase().includes('ceo'))
+            ? null
+            : (selectedViewUser?._id || selectedViewUser?.agentName || null);
+          fetchQuarterlyData(quarter, viewAsId, selectedMonth);
+        }}
       />
       {/* ── header ── */}
       <div style={{ background: 'linear-gradient(135deg, #1a1a2e, #16213e)', color: '#fff', padding: '12px 20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -674,13 +649,14 @@ const Dashboard = () => {
         <div style={{ display: 'flex', flex: 1, gap: 24, overflow: 'hidden', flexWrap: 'wrap' }}>
 
           {/* 🔹 LEFT COLUMN — DASHBOARD (Block A) */}
-          <div style={{ flex: '1 1 60%', minWidth: 600, overflowY: 'auto', paddingRight: 4, paddingBottom: 20 }}>
-            {/* ── Dashboard Content ── */}
-            {quarterlyData && !viewedIsCEO && (
-              <div style={{
-                background: '#ffffff',
-                borderRadius: 14,
-                padding: '20px',
+          {!viewedIsCEO && (
+            <div style={{ flex: '1 1 60%', minWidth: 600, overflowY: 'auto', paddingRight: 4, paddingBottom: 20 }}>
+              {/* ── Dashboard Content ── */}
+              {quarterlyData && (
+                <div style={{
+                  background: '#ffffff',
+                  borderRadius: 14,
+                  padding: '20px',
                 marginBottom: 12,
                 boxShadow: '0 4px 20px rgba(0,0,0,0.06)',
                 border: '1px solid #f1f3f5'
@@ -762,60 +738,47 @@ const Dashboard = () => {
                     })}
                   </div>
 
-                  {/* 🟨 CENTER COLUMN - Styled like attached Image */}
-                  <div style={{ flex: '1 1 340px', background: '#212338', borderRadius: 16, padding: '24px 28px', display: 'flex', gap: 24, alignItems: 'stretch', boxShadow: '0 10px 30px rgba(0,0,0,0.1)' }}>
+                  {/* 🟨 CENTER COLUMN - Target Breakdown */}
+                  <div style={{ 
+                    flex: '1 1 300px', 
+                    background: '#ffffff', 
+                    border: '1px solid #e5e7eb',
+                    borderRadius: 16, 
+                    padding: '24px 28px', 
+                    display: 'flex', 
+                    flexDirection: 'column', 
+                    justifyContent: 'center', 
+                    boxShadow: '0 6px 18px rgba(0,0,0,0.06)' 
+                  }}>
                     {/* Left side text logic */}
                     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
-                      <div style={{ fontSize: 17, fontWeight: 700, color: '#ffffff', marginBottom: 16 }}>Target Breakdown:</div>
-                      <div style={{ fontSize: 15, fontWeight: 500, color: '#94a3b8', marginBottom: 16 }}>
-                        PO Target: 20 × ₹1,000 = <span style={{ color: '#ffffff', fontWeight: 800 }}>₹20,000</span>
+                      <div style={{ fontSize: 17, fontWeight: 700, color: '#111827', marginBottom: 16 }}>Target Breakdown:</div>
+                      
+                      {/* PO Breakdown - Hide if 0 (e.g., Inbound/Outbound) */}
+                      {quarterlyData?.po_target > 0 && (
+                        <div style={{ fontSize: 15, fontWeight: 500, color: '#64748b', marginBottom: quarterlyData?.sql_target > 0 ? 8 : 16 }}>
+                          PO Target: {quarterlyData?.po_target || 0} × {fmt(quarterlyData?.incentive_per_po || 0)} = <span style={{ color: '#111827', fontWeight: 800 }}>{fmt(quarterlyData?.po_potential || 0)}</span>
+                        </div>
+                      )}
+                      
+                      {/* SQL Breakdown (only if applicable) */}
+                      {quarterlyData?.sql_target > 0 && (
+                        <div style={{ fontSize: 15, fontWeight: 500, color: '#64748b', marginBottom: 16 }}>
+                          SQL Target: {quarterlyData?.sql_target || 0} × {fmt(quarterlyData?.incentive_per_sql || 300)} = <span style={{ color: '#111827', fontWeight: 800 }}>{fmt(quarterlyData?.sql_potential || 0)}</span>
+                        </div>
+                      )}
+
+                      <div style={{ borderBottom: '1px solid #e5e7eb', marginBottom: 16 }}></div>
+                      
+                      <div style={{ fontSize: 18, fontWeight: 700, color: '#111827', marginBottom: 30 }}>
+                        Total Potential: <span style={{ color: '#10b981' }}>{fmt(quarterlyData?.target_potential || 0)}</span>
                       </div>
-                      <div style={{ borderBottom: '1px solid rgba(255,255,255,0.08)', marginBottom: 16 }}></div>
-                      <div style={{ fontSize: 16, fontWeight: 700, color: '#ffffff', marginBottom: 30 }}>
-                        Total Potential: ₹20,000
-                      </div>
-                      <div style={{ fontSize: 13, fontWeight: 600, color: '#fbbf24', marginBottom: 4 }}>
+                      
+                      <div style={{ fontSize: 13, fontWeight: 600, color: '#d97706', marginBottom: 4 }}>
                         This is not a market problem.
                       </div>
-                      <div style={{ fontSize: 13, fontWeight: 600, color: '#34d399' }}>
+                      <div style={{ fontSize: 13, fontWeight: 600, color: '#059669' }}>
                         This is an EXECUTION opportunity.
-                      </div>
-                    </div>
-
-                    {/* Right side physical calculator UI */}
-                    <div style={{ width: 170, background: '#27293d', borderRadius: 12, padding: 12, boxShadow: 'inset 0 2px 4px rgba(255,255,255,0.05), 0 8px 16px rgba(0,0,0,0.2)', display: 'flex', flexDirection: 'column', gap: 10 }}>
-                      <div style={{ background: '#aab8b1', borderRadius: 6, padding: '8px 10px', textAlign: 'right', fontSize: 22, fontWeight: 400, color: '#1a1a2e', fontFamily: 'monospace', letterSpacing: 1, boxShadow: 'inset 0 2px 4px rgba(0,0,0,0.2)', overflow: 'hidden', whiteSpace: 'nowrap' }}>
-                        {calcDisplay.length > 10 ? parseFloat(calcDisplay).toExponential(4) : calcDisplay}
-                      </div>
-                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 6, flex: 1 }}>
-                        {['AC', '+/-', '%', '÷',
-                          '7', '8', '9', '×',
-                          '4', '5', '6', '-',
-                          '1', '2', '3', '+',
-                          '0', '.', '='
-                        ].map((btn) => (
-                          <button
-                            key={btn}
-                            onClick={() => handleCalcClick(btn)}
-                            style={{
-                              gridColumn: btn === '=' ? 'span 2' : 'span 1',
-                              background: btn === 'AC' ? '#f97316' : '#363a50',
-                              border: 'none',
-                              borderRadius: 6,
-                              color: '#ffffff',
-                              fontSize: 14,
-                              fontWeight: 600,
-                              cursor: 'pointer',
-                              padding: '0',
-                              display: 'flex',
-                              alignItems: 'center',
-                              justifyContent: 'center',
-                              boxShadow: '0 2px 0 rgba(0,0,0,0.2)'
-                            }}
-                          >
-                            {btn}
-                          </button>
-                        ))}
                       </div>
                     </div>
                   </div>
@@ -891,231 +854,57 @@ const Dashboard = () => {
 
                 </div>
               </div>
-            )}
-          </div>
+              )}
+            </div>
+          )}
 
           {/* 🔹 RIGHT COLUMN — PO INCENTIVE TABLE (Block B) */}
-          <div style={{ flex: '1 1 35%', minWidth: 400, overflowY: 'auto', paddingRight: 8, paddingBottom: 20, display: 'flex', flexDirection: 'column', gap: 16 }}>
+          <div style={{ flex: viewedIsCEO ? '1 1 100%' : '1 1 35%', minWidth: 400, width: viewedIsCEO ? '100%' : 'auto', overflowY: 'auto', paddingRight: 8, paddingBottom: 20, display: 'flex', flexDirection: 'column', gap: 16 }}>
             {/* ── Admin personal PO incentives (her own closures) — only show when viewing own dashboard ── */}
             {isAdmin && !isCEO && !viewedUser && (
-              <Section title={`📋 Your PO Incentives (₹1,000 per PO) — ${selectedYear} ${selectedQuarter}`}>
+              <Section title={`📋 Pushpalata’s Closed PO Leads — ${selectedYear} ${selectedQuarter}`}>
                 <IncentiveTable
-                  // For admin, show only her own PO incentives from the quarterly data
-                  leads={null}
+                  leads={leads.filter(l => (l.leadOwner || l.salesOwner || '').toLowerCase().trim() === 'pushpalata')}
                   incentives={(quarterlyData?.po_incentives || []).filter(
-                    inc => {
-                      const incAgentName = (inc.agentName || '').trim().toLowerCase();
-                      const userAgentName = (user?.agentName || '').trim().toLowerCase();
-                      return incAgentName === userAgentName;
-                    }
+                    inc => (inc.agentName || '').toLowerCase().trim() === 'pushpalata'
                   )}
                   incMap={incMap}
                   type="CLOSURE"
-                  isAdmin={false}       // read-only; approvals for others are in the admin sections below
+                  isAdmin={isAdmin}
                   role={role}
-                  onApproval={null}
+                  onApproval={handleApproval}
                   onViewDetail={openDetail}
                   showOwner={false}
                 />
               </Section>
             )}
 
-            {/* ── Admin approvals: SQL Closure team PO incentives — only show for Admin (Pushpalata), not CEO ── */}
-            {/* CEO sees all data in the "SQL Closure Team — PO Incentives" section below */}
+            {/* ── Admin Dashboard: Leads Pending Admin Review (Table 2) ── */}
             {isAdmin && !isCEO && !viewedUser && (
-              <Section title={`🔵 SQL Closure Team — Pending PO Approvals — ${selectedYear} ${selectedQuarter}`}>
-                <div style={{ overflowX: 'auto' }}>
-                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
-                    <thead>
-                      <tr style={{ background: '#f8f9fa', borderBottom: '2px solid #e9ecef' }}>
-                        <th style={th}>Enquiry Code</th>
-                        <th style={th}>Owner</th>
-                        <th style={th}>Client Company</th>
-                        <th style={{ ...th, textAlign: 'right' }}>Amount</th>
-                        <th style={{ ...th, textAlign: 'center' }}>Admin</th>
-                        <th style={{ ...th, textAlign: 'center' }}>CEO</th>
-                        <th style={{ ...th, textAlign: 'center' }}>Actions</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {(quarterlyData?.pending_approvals || incentives)
-                        .filter(inc => {
-                          if (inc.status === 'Reversed') return false;
-                          const team = ['Gauri', 'gauri', 'Anjali', 'anjali', 'Amisha', 'amisha'];
-                          return inc.incentiveType === 'CLOSURE' && team.includes(inc.agentName);
-                        })
-                        .map(inc => (
-                          <tr key={inc._id} style={{ borderBottom: '1px solid #f0f0f0' }}>
-                            <td style={{ ...td, fontWeight: 700, color: '#6c5ce7' }}>{inc.enquiryCode}</td>
-                            <td style={{ ...td, fontWeight: 600 }}>{inc.agentName}</td>
-                            <td style={td}>{inc.clientCompanyName || '—'}</td>
-                            <td style={{ ...td, textAlign: 'right', fontWeight: 800, color: '#00b894' }}>{fmt(inc.amount)}</td>
-                            <td style={{ ...td, textAlign: 'center' }}>
-                              <button
-                                onClick={() => handleApproval(inc._id, 'admin', inc.adminApproved)}
-                                style={{
-                                  padding: '6px 12px', borderRadius: 8, border: 'none',
-                                  background: inc.adminApproved ? '#d4edda' : '#6c5ce7',
-                                  color: inc.adminApproved ? '#155724' : '#fff',
-                                  fontSize: 11, fontWeight: 700, cursor: 'pointer',
-                                  display: 'inline-flex', alignItems: 'center', gap: 4,
-                                }}
-                                title={inc.adminApproved ? 'Revoke Admin approval' : 'Approve as Admin'}
-                              >
-                                <FiCheck size={12} /> {inc.adminApproved ? 'Approved' : 'Approve'}
-                              </button>
-                            </td>
-                            <td style={{ ...td, textAlign: 'center' }}>
-                              {isCEO ? (
-                                // CEO can approve/reject CEO approvals
-                                <button
-                                  onClick={() => handleApproval(inc._id, 'ceo', inc.ceoApproved)}
-                                  style={{
-                                    padding: '6px 12px', borderRadius: 8, border: 'none',
-                                    background: inc.ceoApproved ? '#d4edda' : '#fdcb6e',
-                                    color: inc.ceoApproved ? '#155724' : '#856404',
-                                    fontSize: 11, fontWeight: 700, cursor: 'pointer',
-                                    display: 'inline-flex', alignItems: 'center', gap: 4,
-                                  }}
-                                  title={inc.ceoApproved ? 'Revoke CEO approval' : 'Approve as CEO'}
-                                >
-                                  <FiCheck size={12} /> {inc.ceoApproved ? 'Approved' : 'Approve'}
-                                </button>
-                              ) : (
-                                // Admin sees CEO approval status (read-only)
-                                <span style={{ padding: '4px 10px', borderRadius: 8, fontSize: 11, fontWeight: 700, background: inc.ceoApproved ? '#d4edda' : '#fff3cd', color: inc.ceoApproved ? '#155724' : '#856404' }}>
-                                  {inc.ceoApproved ? (
-                                    <>
-                                      <FiCheck size={12} style={{ verticalAlign: 'middle', marginRight: 4 }} /> Approved
-                                    </>
-                                  ) : (
-                                    <>
-                                      <FiClock size={12} style={{ verticalAlign: 'middle', marginRight: 4 }} /> Pending CEO
-                                    </>
-                                  )}
-                                </span>
-                              )}
-                            </td>
-                            <td style={{ ...td, textAlign: 'center' }}>
-                              <button
-                                onClick={() => openDetail(inc.enquiryCode)}
-                                style={{
-                                  padding: '6px 10px', borderRadius: 8, border: '1px solid #e9ecef',
-                                  background: '#fff', color: '#6c5ce7', fontSize: 11, fontWeight: 600,
-                                  cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 4,
-                                }}
-                                title="View Lead Details"
-                              >
-                                <FiEye size={12} /> Details
-                              </button>
-                            </td>
-                          </tr>
-                        ))}
-                    </tbody>
-                  </table>
-                </div>
-              </Section>
+              <PendingApprovalsSection
+                title={`🔵 Leads Pending Admin Review (Other Users) — ${selectedYear} ${selectedQuarter}`}
+                incentives={(quarterlyData?.pending_approvals || []).filter(
+                  inc => (inc.agentName || '').toLowerCase().trim() !== 'pushpalata'
+                )}
+                leads={leads}
+                incMap={incMap}
+                userRole={role}
+                userName={currentAgentName}
+                isCEO={isCEO}
+                onApproval={handleApproval}
+                onViewDetail={openDetail}
+              />
             )}
 
-            {/* ── Admin approvals: Prospector team SQL & PO Conversion — only show when viewing own dashboard ── */}
-            {isAdmin && !isCEO && !viewedUser && (
-              <Section title={`🟢 Prospector Team — Pending SQL & PO Conversion — ${selectedYear} ${selectedQuarter}`}>
-                <div style={{ overflowX: 'auto' }}>
-                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
-                    <thead>
-                      <tr style={{ background: '#f8f9fa', borderBottom: '2px solid #e9ecef' }}>
-                        <th style={th}>Enquiry Code</th>
-                        <th style={th}>Prospector</th>
-                        <th style={th}>Client Company</th>
-                        <th style={{ ...th, textAlign: 'right' }}>Amount</th>
-                        <th style={{ ...th, textAlign: 'center' }}>Type</th>
-                        <th style={{ ...th, textAlign: 'center' }}>Admin</th>
-                        <th style={{ ...th, textAlign: 'center' }}>CEO</th>
-                        <th style={{ ...th, textAlign: 'center' }}>Actions</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {(quarterlyData?.pending_approvals || incentives)
-                        .filter(inc => {
-                          if (inc.status === 'Reversed') return false;
-                          const team = ['Aparna', 'aparna', 'Sapna', 'sapna'];
-                          return (inc.incentiveType === 'SQL' || inc.incentiveType === 'PO_CONVERSION') && team.includes(inc.agentName);
-                        })
-                        .map(inc => (
-                          <tr key={inc._id} style={{ borderBottom: '1px solid #f0f0f0' }}>
-                            <td style={{ ...td, fontWeight: 700, color: '#6c5ce7' }}>{inc.enquiryCode}</td>
-                            <td style={{ ...td, fontWeight: 600 }}>{inc.agentName}</td>
-                            <td style={td}>{inc.clientCompanyName || '—'}</td>
-                            <td style={{ ...td, textAlign: 'right', fontWeight: 800, color: '#00b894' }}>{fmt(inc.amount)}</td>
-                            <td style={{ ...td, textAlign: 'center' }}>
-                              <span style={{
-                                padding: '3px 8px', borderRadius: 6, fontSize: 11, fontWeight: 700,
-                                background: inc.incentiveType === 'SQL' ? '#e3f2fd' : '#fff3e0',
-                                color: inc.incentiveType === 'SQL' ? '#0984e3' : '#f9a825',
-                              }}>
-                                {inc.incentiveType === 'SQL' ? 'SQL' : 'PO Conv.'}
-                              </span>
-                            </td>
-                            <td style={{ ...td, textAlign: 'center' }}>
-                              {inc.adminApproved ? (
-                                <span style={{ padding: '4px 10px', borderRadius: 8, fontSize: 11, fontWeight: 700, background: '#d4edda', color: '#155724' }}>
-                                  <FiCheck size={12} style={{ verticalAlign: 'middle', marginRight: 4 }} /> Approved
-                                </span>
-                              ) : (
-                                <button
-                                  onClick={() => handleApproval(inc._id, 'admin', false)}
-                                  style={{
-                                    padding: '6px 12px', borderRadius: 8, border: 'none', background: '#6c5ce7',
-                                    color: '#fff', fontSize: 11, fontWeight: 700, cursor: 'pointer',
-                                    display: 'inline-flex', alignItems: 'center', gap: 4,
-                                  }}
-                                  title="Approve as Admin"
-                                >
-                                  <FiCheck size={12} /> Approve
-                                </button>
-                              )}
-                            </td>
-                            <td style={{ ...td, textAlign: 'center' }}>
-                              {inc.ceoApproved ? (
-                                <span style={{ padding: '4px 10px', borderRadius: 8, fontSize: 11, fontWeight: 700, background: '#d4edda', color: '#155724' }}>
-                                  <FiCheck size={12} style={{ verticalAlign: 'middle', marginRight: 4 }} /> Approved
-                                </span>
-                              ) : (
-                                <span style={{ padding: '4px 10px', borderRadius: 8, fontSize: 11, fontWeight: 700, background: '#fff3cd', color: '#856404' }}>
-                                  <FiClock size={12} style={{ verticalAlign: 'middle', marginRight: 4 }} /> Pending CEO
-                                </span>
-                              )}
-                            </td>
-                            <td style={{ ...td, textAlign: 'center' }}>
-                              <button
-                                onClick={() => openDetail(inc.enquiryCode)}
-                                style={{
-                                  padding: '6px 10px', borderRadius: 8, border: '1px solid #e9ecef',
-                                  background: '#fff', color: '#6c5ce7', fontSize: 11, fontWeight: 600,
-                                  cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 4,
-                                }}
-                                title="View Lead Details"
-                              >
-                                <FiEye size={12} /> Details
-                              </button>
-                            </td>
-                          </tr>
-                        ))}
-                    </tbody>
-                  </table>
-                </div>
-              </Section>
-            )}
-
-            {/* ── SQL Closure View ── */}
-            {/* For SQL Closure role: show only their own PO incentives
+            {/* ── All Agents View PO Incentives ── */}
+            {/* For agents context: show their own PO incentives
             For Admin viewing another user: show that user's PO incentives
             For Admin viewing own dashboard: hide (already shown in admin personal section above)
-            For CEO: show SQL Closure team PO incentives */}
-            {((viewedRole === 'sql_closure') || (viewedRole === 'admin' && viewedUser) || (isCEO && !viewedUser)) && (
-              <Section title={(isCEO && !viewedUser) ? `🔵 SQL Closure Team — PO Incentives (₹1,000/PO) — ${selectedYear} ${selectedQuarter}` : `📋 Your PO Incentives (₹1,000 per PO) — ${selectedYear} ${selectedQuarter}`}>
+            For CEO: show PO incentives */}
+            {((viewedRole !== 'admin') || (viewedRole === 'admin' && viewedUser) || (isCEO && !viewedUser)) && (
+              <Section title={(isCEO && !viewedUser) ? `🔵 Team PO Incentives (₹1,000/PO) — ${selectedYear} ${selectedQuarter}` : `📋 Your PO Incentives (₹1,000 per PO) — ${selectedYear} ${selectedQuarter}`}>
                 <IncentiveTable
-                  leads={quarterlyData?.po_incentives ? null : leads.filter(l => l.poDate)}
+                  leads={leads.filter(l => l.poDate)}
                   incentives={quarterlyData?.po_incentives || null}
                   incMap={incMap}
                   type="CLOSURE"
@@ -1123,7 +912,7 @@ const Dashboard = () => {
                   role={viewedRole}
                   onApproval={handleApproval}
                   onViewDetail={openDetail}
-                  showOwner={isCeo}
+                  showOwner={viewedIsCEO}
                 />
               </Section>
             )}
@@ -1133,7 +922,7 @@ const Dashboard = () => {
             {/* For Prospector role: show only their own SQL/PO Conversion incentives
             For Admin (Pushpalata): show Prospector team incentives if not SQL Closure team member
             For CEO: hide this section (CEO sees SQL Closure approvals instead) */}
-            {(viewedRole === 'prospector' || (viewedRole === 'admin' && !viewedIsSQLClosureTeamMember && !isCEO)) && (
+            {((['prospector', 'inbound', 'outbound', 'sql_closure'].includes(viewedRole)) || (viewedRole === 'admin' && !viewedIsSQLClosureTeamMember && !isCEO)) && (
               <Section title={viewedIsCEO ? `🟢 Prospector Team — SQL & PO Conversion Incentives — ${selectedYear} ${selectedQuarter}` : `📋 Your SQL Incentives — ${selectedYear} ${selectedQuarter}`}>
                 <ProspectorTable
                   leads={quarterlyData?.prospector_leads || leads.filter(l => l.sqlDate)}
@@ -1143,7 +932,7 @@ const Dashboard = () => {
                   role={role}
                   onApproval={handleApproval}
                   onViewDetail={openDetail}
-                  showOwner={isCeo}
+                  showOwner={viewedIsCEO}
                 />
               </Section>
             )}
@@ -1191,6 +980,17 @@ const Dashboard = () => {
           {detailLoading ? <p style={{ textAlign: 'center', padding: 20 }}>Loading lead details...</p> : detailLead && <LeadDetailContent data={detailLead} role={role} />}
         </Modal>
       )}
+      {/* ── Target Management Modal ── */}
+      {showTargetModal && (
+        <TargetManagementModal
+          onClose={() => setShowTargetModal(false)}
+          onSaved={() => {
+            setShowTargetModal(false);
+            const quarter = `${selectedYear}-${selectedQuarter}`;
+            fetchQuarterlyData(quarter, selectedViewUser?._id || selectedViewUser?.agentName || null, selectedMonth);
+          }}
+        />
+      )}
     </div>
   );
 };
@@ -1217,7 +1017,7 @@ const Modal = ({ title, onClose, children, wide }) => (
 );
 
 /* ── SQL Closure incentive table ── */
-const IncentiveTable = ({ leads, incentives, incMap, type, isAdmin, onApproval, onViewDetail, showOwner }) => {
+const IncentiveTable = ({ leads, incentives, incMap, type, isAdmin, onApproval, onViewDetail, showOwner, personalView }) => {
   // If incentives array is provided (from quarterly data), use it directly
   // Check if we have incentives first, then check leads
   if (incentives && Array.isArray(incentives) && incentives.length > 0) {
@@ -1229,14 +1029,27 @@ const IncentiveTable = ({ leads, incentives, incMap, type, isAdmin, onApproval, 
               <th style={th}>Enquiry Code</th>
               <th style={th}>Client Company</th>
               {showOwner && <th style={th}>Owner</th>}
-              <th style={th}>Order Recv No</th>
-              <th style={th}>PI Number</th>
+              {personalView ? (
+                <>
+                  <th style={th}>Industry</th>
+                  <th style={th}>Contact</th>
+                </>
+              ) : (
+                <>
+                  <th style={th}>Order Recv No</th>
+                  <th style={th}>PI Number</th>
+                </>
+              )}
               <th style={{ ...th, textAlign: 'center' }}>PO Date</th>
               <th style={{ ...th, textAlign: 'right' }}>PO Value</th>
-              <th style={th}>PO Number</th>
+              {!personalView && <th style={th}>PO Number</th>}
               <th style={{ ...th, textAlign: 'right' }}>Incentive</th>
-              <th style={{ ...th, textAlign: 'center' }}>Admin</th>
-              <th style={{ ...th, textAlign: 'center' }}>CEO</th>
+              {!personalView && (
+                <>
+                  <th style={{ ...th, textAlign: 'center' }}>Admin</th>
+                  <th style={{ ...th, textAlign: 'center' }}>CEO</th>
+                </>
+              )}
               <th style={{ ...th, textAlign: 'center' }}>Status</th>
               <th style={{ ...th, textAlign: 'center' }}></th>
             </tr>
@@ -1249,18 +1062,43 @@ const IncentiveTable = ({ leads, incentives, incMap, type, isAdmin, onApproval, 
                   <td style={{ ...td, fontWeight: 700, color: '#6c5ce7' }}>{inc.enquiryCode}</td>
                   <td style={td}>{inc.clientCompanyName || lead.clientCompanyName || '—'}</td>
                   {showOwner && <td style={{ ...td, color: '#6c757d' }}>{lead.salesOwner || lead.leadOwner || inc.agentName || '—'}</td>}
-                  <td style={{ ...td, color: '#6c757d', fontSize: 12 }}>{lead.orderReceivedNumber || 'Not Available'}</td>
-                  <td style={{ ...td, color: '#6c757d', fontSize: 12 }}>{lead.piNumber || 'Not Available'}</td>
+                  {personalView ? (
+                    <>
+                      <td style={{ ...td, color: '#6c757d' }}>{lead.industry || '—'}</td>
+                      <td style={{ ...td, color: '#6c757d' }}>{lead.clientPersonName || '—'}</td>
+                    </>
+                  ) : (
+                    <>
+                      <td style={{ ...td, color: '#6c757d', fontSize: 12 }}>{lead.orderReceivedNumber || 'Not Available'}</td>
+                      <td style={{ ...td, color: '#6c757d', fontSize: 12 }}>{lead.piNumber || 'Not Available'}</td>
+                    </>
+                  )}
                   <td style={{ ...td, textAlign: 'center' }}>{fmtDate(lead.poDate || inc.incentive_date)}</td>
                   <td style={{ ...td, textAlign: 'right', fontWeight: 600 }}>{lead.poValue ? fmt(lead.poValue) : '—'}</td>
-                  <td style={{ ...td, color: '#6c757d', fontSize: 12 }}>{lead.poNumber || '—'}</td>
+                  {!personalView && <td style={{ ...td, color: '#6c757d', fontSize: 12 }}>{lead.poNumber || '—'}</td>}
                   <td style={{ ...td, textAlign: 'right', fontWeight: 800, color: '#00b894' }}>{fmt(inc.amount)}</td>
-                  <td style={{ ...td, textAlign: 'center' }}>
-                    <ApprovalBadge approved={inc.adminApproved} label="Admin" canClick={isAdmin} onClick={() => onApproval(inc._id, 'admin', inc.adminApproved)} />
-                  </td>
-                  <td style={{ ...td, textAlign: 'center' }}>
-                    <ApprovalBadge approved={inc.ceoApproved} label="CEO" canClick={isAdmin} onClick={() => onApproval(inc._id, 'ceo', inc.ceoApproved)} />
-                  </td>
+                  {!personalView && (
+                    <>
+                      <td style={{ ...td, textAlign: 'center' }}>
+                        <ApprovalBadge 
+                          approved={inc.adminApproved} 
+                          label="Admin" 
+                          canClick={isAdmin && !!inc._id} 
+                          onClick={() => onApproval(inc._id, 'admin', inc.adminApproved)} 
+                        />
+                        {!inc._id && <div style={{ fontSize: 9, color: '#adb5bd', marginTop: 2 }}>Sync Required</div>}
+                      </td>
+                      <td style={{ ...td, textAlign: 'center' }}>
+                        <ApprovalBadge 
+                          approved={inc.ceoApproved} 
+                          label="CEO" 
+                          canClick={isAdmin && !!inc._id} 
+                          onClick={() => onApproval(inc._id, 'ceo', inc.ceoApproved)} 
+                        />
+                        {!inc._id && <div style={{ fontSize: 9, color: '#adb5bd', marginTop: 2 }}>Sync Required</div>}
+                      </td>
+                    </>
+                  )}
                   <td style={{ ...td, textAlign: 'center' }}>
                     <StatusBadge status={inc.adminApproved && inc.ceoApproved ? 'Earned' : 'Pending'} />
                   </td>
@@ -1277,11 +1115,17 @@ const IncentiveTable = ({ leads, incentives, incMap, type, isAdmin, onApproval, 
   }
 
   // Fallback to original leads-based rendering
-  // If we have incentives array but it's empty, show message
-  if (incentives && Array.isArray(incentives) && incentives.length === 0) {
-    return <p style={{ color: '#6c757d', textAlign: 'center', padding: 24 }}>No PO incentives found for this quarter.</p>;
+  // Only show "no incentives found" if we have no leads either
+  if (incentives && Array.isArray(incentives) && incentives.length === 0 && (!leads || !leads.length)) {
+    return <p style={{ color: '#6c757d', textAlign: 'center', padding: 24 }}>No PO incentives or leads found for this quarter.</p>;
   }
-  if (!leads || !leads.length) return <p style={{ color: '#6c757d', textAlign: 'center', padding: 24 }}>No PO leads found for this quarter.</p>;
+  if (!leads || !leads.length) {
+    if (incentives && incentives.length > 0) {
+       // already handled above
+    } else {
+       return <p style={{ color: '#6c757d', textAlign: 'center', padding: 24 }}>No PO leads found for this quarter.</p>;
+    }
+  }
   return (
     <div style={{ overflowX: 'auto' }}>
       <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
@@ -1311,20 +1155,33 @@ const IncentiveTable = ({ leads, incentives, incMap, type, isAdmin, onApproval, 
                 <td style={{ ...td, fontWeight: 700, color: '#6c5ce7' }}>{lead.enquiryCode}</td>
                 <td style={td}>{lead.clientCompanyName || '—'}</td>
                 {showOwner && <td style={{ ...td, color: '#6c757d' }}>{lead.salesOwner || lead.leadOwner}</td>}
-                <td style={{ ...td, color: '#6c757d', fontSize: 12 }}>{lead.orderReceivedNumber || 'Not Available'}</td>
-                <td style={{ ...td, color: '#6c757d', fontSize: 12 }}>{lead.piNumber || 'Not Available'}</td>
+                {personalView ? (
+                  <>
+                    <td style={{ ...td, color: '#6c757d' }}>{lead.industry || '—'}</td>
+                    <td style={{ ...td, color: '#6c757d' }}>{lead.clientPersonName || '—'}</td>
+                  </>
+                ) : (
+                  <>
+                    <td style={{ ...td, color: '#6c757d', fontSize: 12 }}>{lead.orderReceivedNumber || 'Not Available'}</td>
+                    <td style={{ ...td, color: '#6c757d', fontSize: 12 }}>{lead.piNumber || 'Not Available'}</td>
+                  </>
+                )}
                 <td style={{ ...td, textAlign: 'center' }}>{fmtDate(lead.poDate)}</td>
                 <td style={{ ...td, textAlign: 'right', fontWeight: 600 }}>{lead.poValue ? fmt(lead.poValue) : '—'}</td>
-                <td style={{ ...td, color: '#6c757d', fontSize: 12 }}>{lead.poNumber || '—'}</td>
-                <td style={{ ...td, textAlign: 'right', fontWeight: 800, color: '#00b894' }}>{inc ? fmt(inc.amount) : '—'}</td>
+                {!personalView && <td style={{ ...td, color: '#6c757d', fontSize: 12 }}>{lead.poNumber || '—'}</td>}
+                <td style={{ ...td, textAlign: 'right', fontWeight: 800, color: '#00b894' }}>{inc ? fmt(inc.amount) : fmt(1000)}</td>
+                {!personalView && (
+                  <>
+                    <td style={{ ...td, textAlign: 'center' }}>
+                      {inc ? <ApprovalBadge approved={inc.adminApproved} label="Admin" canClick={isAdmin} onClick={() => onApproval(inc._id, 'admin', inc.adminApproved)} /> : <span style={{ color: '#adb5bd', fontSize: 10 }}>Pending Sync</span>}
+                    </td>
+                    <td style={{ ...td, textAlign: 'center' }}>
+                      {inc ? <ApprovalBadge approved={inc.ceoApproved} label="CEO" canClick={isAdmin} onClick={() => onApproval(inc._id, 'ceo', inc.ceoApproved)} /> : <span style={{ color: '#adb5bd', fontSize: 10 }}>Pending Sync</span>}
+                    </td>
+                  </>
+                )}
                 <td style={{ ...td, textAlign: 'center' }}>
-                  {inc ? <ApprovalBadge approved={inc.adminApproved} label="Admin" canClick={isAdmin} onClick={() => onApproval(inc._id, 'admin', inc.adminApproved)} /> : '—'}
-                </td>
-                <td style={{ ...td, textAlign: 'center' }}>
-                  {inc ? <ApprovalBadge approved={inc.ceoApproved} label="CEO" canClick={isAdmin} onClick={() => onApproval(inc._id, 'ceo', inc.ceoApproved)} /> : '—'}
-                </td>
-                <td style={{ ...td, textAlign: 'center' }}>
-                  {inc ? <StatusBadge status={inc.adminApproved && inc.ceoApproved ? 'Earned' : 'Pending'} /> : '—'}
+                  {inc ? <StatusBadge status={inc.adminApproved && inc.ceoApproved ? 'Earned' : 'Pending'} /> : <span style={{ color: '#adb5bd', fontSize: 10 }}>Not Synced</span>}
                 </td>
                 <td style={{ ...td, textAlign: 'center' }}>
                   <button onClick={() => onViewDetail(lead.enquiryCode)} style={viewBtn}><FiEye size={14} /></button>

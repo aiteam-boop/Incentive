@@ -97,91 +97,86 @@ router.get('/:leadOwner', authenticate, authorize('admin'), async (req, res) => 
 });
 
 /**
+ * PUT /api/targets/update
+ * Admin updates a target.
+ * Syncs root fields AND appends a history snapshot.
+ */
+router.put('/update', authenticate, authorize('admin'), async (req, res) => {
+    try {
+        const col = getTargetsCollection();
+        const { Lead_Owner, ...fields } = req.body;
+
+        if (!Lead_Owner) {
+            return res.status(400).json({ success: false, message: 'Lead_Owner is required' });
+        }
+
+        const existingDoc = await col.findOne({ Lead_Owner });
+        if (!existingDoc) {
+            return res.status(404).json({ success: false, message: `Target doc not found for: ${Lead_Owner}` });
+        }
+
+        // 1. Build new history entry
+        const historyEntry = {
+            ...fields,
+            updatedAt: new Date().toISOString(),
+            updatedBy: req.user.agentName || req.user.username || 'Admin'
+        };
+
+        // 2. Perform Update: 
+        // - Set root-level fields (to reflect immediately in dashboard/UI)
+        // - Push to target_update_history
+        const updatePayload = {
+            $set: fields,
+            $push: { target_update_history: historyEntry }
+        };
+
+        await col.updateOne({ Lead_Owner }, updatePayload);
+
+        const updatedDoc = await col.findOne({ Lead_Owner });
+        res.json({
+            success: true,
+            message: `Targets updated for ${Lead_Owner}`,
+            target: resolveEffectiveTarget(updatedDoc)
+        });
+    } catch (error) {
+        console.error('PUT /targets/update error:', error);
+        res.status(500).json({ success: false, message: error.message });
+    }
+});
+
+/**
  * PUT /api/targets/:leadOwner
- * Admin updates a target — NEVER modifies original fields.
- * Appends a new snapshot to the target_update_history array using $push.
- *
- * Body: {
- *   "Monthly Sql Target": 30,
- *   "Monthly Po Target": 10,
- *   "Monthly Price": 30000,
- *   ... (any target fields)
- * }
+ * Same as above but via URL param.
  */
 router.put('/:leadOwner', authenticate, authorize('admin'), async (req, res) => {
     try {
         const col = getTargetsCollection();
         const leadOwner = req.params.leadOwner;
 
-        // Verify the document exists
         const existingDoc = await col.findOne({ Lead_Owner: leadOwner });
         if (!existingDoc) {
             return res.status(404).json({ success: false, message: `Target not found for: ${leadOwner}` });
         }
 
-        // Build the new history entry — full snapshot of provided target fields
-        const allowedFields = [
-            'Monthly Sql Target',
-            'Monthly Po Target',
-            'Monthly Price',
-            'Monthly Mql Target',
-            'Monthly Call_Target',
-            'Quaterly Sql Target',
-            'Quaterly Po Target',
-            'Quaterly Closure Target',
-        ];
-
-        // Start with the CURRENT effective values as base (to create full snapshot)
-        const current = resolveEffectiveTarget(existingDoc);
-        const newEntry = {
-            // Full snapshot — start from current effective values, apply overrides from request
-            'Monthly Sql Target': req.body['Monthly Sql Target'] !== undefined
-                ? Number(req.body['Monthly Sql Target'])
-                : current['Monthly Sql Target'],
-            'Monthly Po Target': req.body['Monthly Po Target'] !== undefined
-                ? Number(req.body['Monthly Po Target'])
-                : current['Monthly Po Target'],
-            'Monthly Price': req.body['Monthly Price'] !== undefined
-                ? Number(req.body['Monthly Price'])
-                : current['Monthly Price'],
-            'Monthly Mql Target': req.body['Monthly Mql Target'] !== undefined
-                ? Number(req.body['Monthly Mql Target'])
-                : current['Monthly Mql Target'],
-            'Monthly Call_Target': req.body['Monthly Call_Target'] !== undefined
-                ? Number(req.body['Monthly Call_Target'])
-                : current['Monthly Call_Target'],
-            'Quaterly Sql Target': req.body['Quaterly Sql Target'] !== undefined
-                ? Number(req.body['Quaterly Sql Target'])
-                : current['Quaterly Sql Target'],
-            'Quaterly Po Target': req.body['Quaterly Po Target'] !== undefined
-                ? Number(req.body['Quaterly Po Target'])
-                : current['Quaterly Po Target'],
-            'Quaterly Closure Target': req.body['Quaterly Closure Target'] !== undefined
-                ? Number(req.body['Quaterly Closure Target'])
-                : current['Quaterly Closure Target'],
+        const historyEntry = {
+            ...req.body,
             updatedAt: new Date().toISOString(),
-            updatedBy: req.user.agentName || req.user.username || 'Admin',
+            updatedBy: req.user.agentName || req.user.username || 'Admin'
         };
 
-        // ⚠️ CRITICAL: Use $push ONLY — NEVER use $set on original fields
         await col.updateOne(
             { Lead_Owner: leadOwner },
             {
-                $push: {
-                    target_update_history: newEntry,
-                },
+                $set: req.body,
+                $push: { target_update_history: historyEntry }
             }
         );
 
-        // Fetch the updated document to return the resolved state
         const updatedDoc = await col.findOne({ Lead_Owner: leadOwner });
-        const resolved = resolveEffectiveTarget(updatedDoc);
-
         res.json({
             success: true,
-            message: `Target updated for ${leadOwner}. History entry #${resolved.historyCount} added.`,
-            target: resolved,
-            newEntry,
+            message: `Target updated for ${leadOwner}`,
+            target: resolveEffectiveTarget(updatedDoc)
         });
     } catch (error) {
         console.error('PUT /targets error:', error);

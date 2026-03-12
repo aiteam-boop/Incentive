@@ -1,7 +1,9 @@
 const express = require('express');
+const mongoose = require('mongoose');
 const IncentiveLedger = require('../models/IncentiveLedger');
 const MonthlyPerformance = require('../models/MonthlyPerformance');
 const Target = require('../models/Target');
+const TeamTarget = require('../models/TeamTarget');
 const User = require('../models/User');
 const { getOperationsDb } = require('../config/mongo');
 const { authenticate, authorize } = require('../middleware/auth');
@@ -337,66 +339,81 @@ router.get('/dashboard', authenticate, async (req, res) => {
       ],
     });
 
-    // Step 1: Get target for this quarter
-    // Priority 1: Try the strongly-typed Target Mongoose model (user_id + quarter)
-    let target = await Target.findOne({ user_id: userId, quarter });
+    // Step 1: Get target for this period
+    // Priority 1: Check individual 'targets' collection (Lead_Owner key)
+    const altTargetsCollection = mongoose.connection.db.collection('targets');
+    const altTarget = await altTargetsCollection.findOne({ Lead_Owner: agentName });
 
     let sql_target = 0;
     let closure_target = 0;
     let po_target = 0;
+    let monthly_price = 0;
+    let target_potential = 0;
     let incentive_per_po = 1000;
     let incentive_per_sql = 300;
 
-    if (target) {
-      // Use Target model data
-      sql_target = target.sql_target || 0;
-      closure_target = target.closure_target || 0;
-      po_target = target.po_target || 0;
-      incentive_per_po = target.incentive_per_po || 1000;
-      incentive_per_sql = target.incentive_per_sql || 300;
+    if (altTarget) {
+      // Extract values from root document which ALWAYS represents the source of truth
+      const rawSql = altTarget['Monthly Sql Target'] ?? 0;
+      const rawPo = altTarget['Monthly Po Target'] ?? 0;
+      monthly_price = altTarget['Monthly Price'] ?? 0;
+      
+      // If viewing the full quarter (no month filter), we scale by 3.
+      const multiplier = month ? 1 : 3;
+      
+      sql_target = rawSql * multiplier;
+      po_target = rawPo * multiplier;
+      closure_target = po_target;
+      
+      target_potential = (rawPo * monthly_price) * multiplier;
+      incentive_per_po = monthly_price; 
+      incentive_per_sql = 300; 
     } else {
-      // Priority 2: Try the raw 'targets' collection (imported sheet data with Lead_Owner key)
-      const mongoose = require('mongoose');
-      const altTargetsCollection = mongoose.connection.db.collection('targets');
-      const altTarget = await altTargetsCollection.findOne({ Lead_Owner: agentName });
-
-      if (altTarget) {
-        // ── target_update_history LOGIC ──
-        // If admin has made updates, they are stored in target_update_history array.
-        // RULE: Use the LAST element if the array exists and has entries.
-        //       Otherwise fall back to root-level imported sheet fields.
-        const hasHistory =
-          Array.isArray(altTarget.target_update_history) &&
-          altTarget.target_update_history.length > 0;
-
-        const effectiveTarget = hasHistory
-          ? altTarget.target_update_history[altTarget.target_update_history.length - 1]
-          : altTarget;
-
-        // Map effective values — note: original imported fields are NEVER modified
-        sql_target = effectiveTarget['Quaterly Sql Target'] ?? altTarget['Quaterly Sql Target'] ?? 0;
-        closure_target = effectiveTarget['Quaterly Closure Target'] ?? altTarget['Quaterly Closure Target'] ?? 0;
-        po_target = effectiveTarget['Quaterly Po Target'] ?? altTarget['Quaterly Po Target'] ?? 0;
-
-        // For incentive calculation: ALWAYS use configured rate (₹1,000 per PO)
-        // Monthly Price represents revenue targets, NOT incentive per PO.
-        incentive_per_po = 1000;
-        incentive_per_sql = 300;
+      // Fallback 1: Strongly-typed Target model (quarter-based)
+      let targetDoc = await Target.findOne({ user_id: userId, quarter });
+      if (targetDoc) {
+        sql_target = targetDoc.sql_target || 0;
+        po_target = targetDoc.po_target || 0;
+        closure_target = targetDoc.closure_target || po_target;
+        target_potential = targetDoc.total_incentive_target || (po_target * (targetDoc.incentive_per_po || 1000));
+        incentive_per_po = targetDoc.incentive_per_po || 1000;
+      } else {
+        // Fallback 2: TeamTarget (monthly based, scale to quarter if needed)
+        const TeamTarget = require('../models/TeamTarget');
+        let teamTarget = await TeamTarget.findOne({ team: role });
+        if (teamTarget) {
+          const multiplier = month ? 1 : 3;
+          sql_target = (teamTarget.sql_target || 0) * multiplier;
+          po_target = (teamTarget.po_target || 0) * multiplier;
+          closure_target = po_target;
+          monthly_price = teamTarget.price_target || 0;
+          target_potential = (po_target * monthly_price);
+          incentive_per_po = monthly_price;
+        }
       }
     }
+    // Calculate breakdown for response
+    // 1. PO Potential: for inbound/outbound, this is 0 (as per requested logic: only SQL counts)
+    const isProspectingRole = (role === 'inbound' || role === 'outbound' || role === 'prospector');
+    const po_potential = isProspectingRole ? 0 : (po_target * incentive_per_po);
+    
+    // 2. SQL Potential: previously was 0 for closure, now everyone gets it if target > 0
+    const sql_potential = (sql_target * incentive_per_sql);
+    
+    // Always recalculate target_potential based on the final components to ensure consistency
+    target_potential = po_potential + sql_potential;
 
-    // Calculate target potential
-    // For SQL Closure team members: only PO potential (they don't have SQL targets)
-    // For Prospector role: PO + SQL potential
-    const po_potential = po_target * incentive_per_po;
-    let sql_potential = shouldTreatAsSQLClosure ? 0 : (sql_target * incentive_per_sql);
-    const target_potential = po_potential + sql_potential;
-
-    // For SQL Closure team members, set sql_target to 0 since they don't track SQL targets
-    if (shouldTreatAsSQLClosure) {
-      sql_target = 0;
-      sql_potential = 0;
+    // Adjust display values for Inbound/Outbound (Hide PO target row by setting to 0)
+    if (isProspectingRole) {
+      po_target = 0;
     }
+
+    // Adjust display values for SQL Closure: show both, but the user specifically asked 
+    // to show SQl target even for closure team. So we no longer set sql_target to 0 here.
+
+    // Step 2: Get earned incentives (quarterly & filtered)
+    // ... rest of the logic remains relative to the period
+
 
     // Step 2: Get earned incentives (quarterly & filtered)
     const allQuarterEarnedIncentives = await IncentiveLedger.find({
@@ -457,29 +474,89 @@ router.get('/dashboard', authenticate, async (req, res) => {
       : 0;
 
     // Step 6: Get leads_master collection for filtering leads
-    const mongoose = require('mongoose');
     const getLeadsMaster = () => mongoose.connection.db.collection('leads_master');
     const col = getLeadsMaster();
 
-    // Step 7: Get PO incentives table data (for SQL Closure role + Admin overview)
+    // Step 7: Get PO incentives table data (for ALL roles so every agent sees their POs)
     let poIncentives = [];
-    if (role === 'sql_closure' || role === 'admin' || (isAdmin && viewAs)) {
+    if (true) { // removed constraint so Sapna/Aparna can see theirs too
+      const targetIsCEO = (viewAsUser?.agentName || agentName || '').toLowerCase().includes('ceo');
+
       // Get PO leads within quarter date range
       // If viewing a specific user, filter by their agentName
-      const poLeadsFilter = (isAdmin && !viewAs)
+      // EXCEPT if that user is the CEO, then show everything (team view)
+      const poLeadsFilter = (isAdmin && (!viewAs || targetIsCEO))
         ? {}
         : { $or: [{ Lead_Owner: agentName }, { Sales_Owner: agentName }] };
 
+      console.log(`[DEBUG] Fetching PO leads for ${agentName} in range ${filterStart.toISOString()} - ${filterEnd.toISOString()}`);
+      console.log(`[DEBUG] Filter:`, JSON.stringify(poLeadsFilter));
+      
       let poLeads = await col.find({
         ...poLeadsFilter,
         PO_Date: {
           $gte: filterStart,
           $lte: filterEnd,
         },
+        Status: 'PO'
       }).sort({ PO_Date: -1 }).toArray();
+
+      console.log(`[DEBUG] Found ${poLeads.length} PO leads`);
+      if (poLeads.length > 0) {
+        console.log(`[DEBUG] First lead: ${poLeads[0]['Enquiry Code']} - ${poLeads[0].Lead_Owner}`);
+      }
 
       // Get incentives for these leads
       const enquiryCodes = poLeads.map(l => l['Enquiry Code']);
+
+      // --- MANUAL CROSS-DATABASE JOIN FOR STAGE 1 & 6 (Operations data) ---
+      try {
+        const opsDb = await getOperationsDb();
+        const enquiryCodesForOps = poLeads.map(l => l['Enquiry Code']).filter(Boolean);
+
+        // Fetch stage1_data
+        const stage1Docs = await opsDb.collection('stage1_data').find({
+          'Sales Enquiry Code': { $in: enquiryCodesForOps }
+        }).project({ 'Sales Enquiry Code': 1, 'Order Received Number': 1 }).toArray();
+
+        const orderNoMapByEnquiry = {};
+        const orderNumbers = [];
+        stage1Docs.forEach(d => {
+          const eq = d['Sales Enquiry Code'];
+          const orderNo = d['Order Received Number'];
+          if (eq && orderNo) {
+            orderNoMapByEnquiry[eq] = orderNo;
+            orderNumbers.push(orderNo);
+          }
+        });
+
+        // Fetch stage6_data
+        const stage6Docs = await opsDb.collection('stage6_data').find({
+          'Order Received Number': { $in: orderNumbers }
+        }).project({ 'Order Received Number': 1, 'PI_number': 1 }).toArray();
+
+        const piMapByOrderNo = {};
+        stage6Docs.forEach(d => {
+          const orderNo = d['Order Received Number'];
+          const piNumber = d['PI_number'];
+          if (orderNo && piNumber) piMapByOrderNo[orderNo] = piNumber;
+        });
+
+        // Attach to leads
+        poLeads = poLeads.map(l => {
+          const eqCode = l['Enquiry Code'];
+          const orderRecvNo = orderNoMapByEnquiry[eqCode];
+          const piNum = orderRecvNo ? piMapByOrderNo[orderRecvNo] : null;
+          return {
+            ...l,
+            orderReceivedNumber: orderRecvNo || 'Not Available',
+            piNumber: piNum || 'Not Available'
+          };
+        });
+      } catch (opsErr) {
+        console.error('Failed to fetch operations data for PO leads:', opsErr.message);
+      }
+      // --- END MANUAL JOIN ---
 
       // Build query for PO incentives
       let incentiveQuery = {
@@ -491,12 +568,12 @@ router.get('/dashboard', authenticate, async (req, res) => {
       // If admin viewing own dashboard, get all PO incentives (will include Pushpalata's own)
       // If viewing specific user, get only that user's incentives
       // Otherwise, get incentives matching the PO leads enquiry codes
-      if (isAdmin && !viewAs) {
-        // Admin viewing own dashboard: get all PO incentives (not filtered by enquiryCode)
-        // This includes Pushpalata's own incentives + team members' incentives
+      if (isAdmin && (!viewAs || targetIsCEO)) {
+        // Admin viewing own dashboard OR viewing CEO dashboard: get all PO incentives
+        // This includes all team members' incentives
         incentiveQuery.userId = { $exists: true };
       } else if (viewAs) {
-        // Viewing specific user: get only their incentives
+        // Viewing specific non-CEO user: get only their incentives
         incentiveQuery.userId = userId;
         incentiveQuery.enquiryCode = { $in: enquiryCodes };
       } else {
@@ -580,16 +657,11 @@ router.get('/dashboard', authenticate, async (req, res) => {
       });
       // --- END MANUAL JOIN ---
 
-      // For Admin/CEO view when NOT viewing a specific user:
-      // - If it's CEO viewing, show SQL Closure team members (Gauri, Anjali, Amisha)
-      // - If it's Admin (Pushpalata) viewing own dashboard, include her own incentives + team members for approval sections
-      // But if viewing a specific user, show only that user's incentives
-      if (isAdmin && !viewAs && isCEO) {
-        // CEO viewing: only show SQL Closure team members (excluding CEO and Pushpalata)
-        const SQL_CLOSURE_TEAM = ['Gauri', 'gauri', 'Anjali', 'anjali', 'Amisha', 'amisha'];
-        poIncentiveRecords = poIncentiveRecords.filter(inc => SQL_CLOSURE_TEAM.includes(inc.agentName));
+      if (isAdmin && targetIsCEO) {
+        // CEO dashboard view: show ALL team members but hide CEO's own (they don't get incentives)
+        poIncentiveRecords = poIncentiveRecords.filter(inc => !(inc.agentName || '').toLowerCase().includes('ceo'));
       } else if (viewAs) {
-        // When viewing a specific user, filter to only that user's incentives
+        // When viewing a specific non-CEO user, filter to only that user's incentives
         poIncentiveRecords = poIncentiveRecords.filter(inc => inc.userId.toString() === userId.toString());
       }
       // If admin (Pushpalata) viewing own dashboard (!viewAs && !isCEO), return all PO incentives
@@ -608,16 +680,31 @@ router.get('/dashboard', authenticate, async (req, res) => {
           poDate: l['PO_Date'],
           poValue: l['PO_Value'],
           poNumber: l['PO_Number'],
+          industry: l['Industry'],
+          clientPersonName: l['Client_Person_Name'],
           orderReceivedNumber: l.orderReceivedNumber,
           piNumber: l.piNumber,
         };
       });
 
-      poIncentives = poIncentiveRecords.map(inc => {
-        const lead = leadMap[inc.enquiryCode] || {};
+      poIncentives = poLeads.map(l => {
+        const leadEnquiryCode = l['Enquiry Code'];
+        const inc = poIncentiveRecords.find(i => i.enquiryCode === leadEnquiryCode);
+        const mappedLead = leadMap[leadEnquiryCode] || {};
         return {
-          ...inc.toObject(),
-          lead,
+          ...(inc?.toObject ? inc.toObject() : inc || {}),
+          enquiryCode: leadEnquiryCode,
+          agentName: l['Lead_Owner'] || l['Sales_Owner'] || 'Unknown',
+          clientCompanyName: l['Client_Company_Name'],
+          amount: inc ? inc.amount : 1000,
+          incentiveType: 'CLOSURE',
+          status: inc ? inc.status : 'Pending',
+          adminApproved: inc ? inc.adminApproved : false,
+          ceoApproved: inc ? inc.ceoApproved : false,
+          lead: {
+            ...l, // keep raw for safety
+            ...mappedLead // override with mapped camelCase fields
+          }
         };
       });
     }

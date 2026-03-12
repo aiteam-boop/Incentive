@@ -16,7 +16,7 @@ const userSchema = new mongoose.Schema(
     // Incentive system role — added by our system
     incentive_role: {
       type: String,
-      enum: ['admin', 'sql_closure', 'prospector', null],
+      enum: ['admin', 'sql_closure', 'prospector', 'inbound', 'outbound', null],
       default: null,
     },
   },

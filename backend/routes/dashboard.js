@@ -52,7 +52,7 @@ router.get('/data', authenticate, async (req, res) => {
     let incentives = [];
     let allIncentives = []; // For admin view
 
-    if (role === 'sql_closure') {
+    if (role === 'sql_closure' || role === 'inbound' || role === 'outbound') {
       // SQL Closure: Show leads where Lead_Owner OR Sales_Owner matches, with PO from Jan 6
       leads = await col.find({
         $or: [{ Lead_Owner: agentName }, { Sales_Owner: agentName }],
@@ -249,11 +249,16 @@ router.post('/sync-incentives', authenticate, authorize('admin'), async (req, re
     users.forEach(u => { userMap[u.agentName] = u; });
 
     // 1. Process SQL Closure incentives (₹1000 per PO)
-    const poLeads = await col.find({ PO_Date: { $gte: CUTOFF_DATE } }).toArray();
+    const poLeads = await col.find({ 
+      PO_Date: { $gte: CUTOFF_DATE },
+      Status: 'PO',
+      actual_PO: 'Valid',
+      PO_count: '1'
+    }).toArray();
     for (const lead of poLeads) {
       const ownerName = lead['Sales_Owner'] || lead['Lead_Owner'];
       const user = userMap[ownerName];
-      if (!user || user.incentive_role !== 'sql_closure') continue;
+      if (!user) continue; // All valid agents can earn PO incentives now
 
       const enquiryCode = lead['Enquiry Code'];
       try {
