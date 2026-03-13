@@ -24,6 +24,22 @@ const roleColors = {
   outbound: '#e17055' 
 };
 
+// Team helpers shared across dashboard & approvals
+const SQL_CLOSURE_TEAM_NAMES = ['Pushpalata', 'pushpalata', 'Anjali', 'anjali', 'Gauri', 'gauri', 'Amisha', 'amisha'];
+const INBOUND_TEAM = ['Sapna', 'sapna'];
+const OUTBOUND_TEAM = ['Aparna', 'aparna'];
+
+const getTeamForInc = (inc) => {
+  const roleForInc = inc.userId?.incentive_role;
+  const name = (inc.agentName || '').trim();
+
+  if (roleForInc === 'sql_closure' || SQL_CLOSURE_TEAM_NAMES.includes(name)) return 'sql_closure';
+  if (roleForInc === 'inbound' || INBOUND_TEAM.includes(name)) return 'inbound';
+  if (roleForInc === 'outbound' || OUTBOUND_TEAM.includes(name)) return 'outbound';
+  if (roleForInc === 'prospector') return 'prospector';
+  return null;
+};
+
 /* ───── stat card ───── */
 const StatCard = ({ icon, label, value, sub, color, bg, onClick }) => (
   <div onClick={onClick} style={{
@@ -97,9 +113,10 @@ const PendingApprovalsSection = ({ incentives, leads, incMap, userRole, userName
       <div style={{ overflowX: 'auto' }}>
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
           <thead>
-            <tr style={{ background: '#f8f9fa', borderBottom: '2px solid #e9ecef' }}>
+          <tr style={{ background: '#f8f9fa', borderBottom: '2px solid #e9ecef' }}>
               <th style={th}>Enquiry Code</th>
-              <th style={th}>Lead Owner</th>
+              <th style={th}>Owner</th>
+              <th style={th}>Team</th>
               <th style={th}>Client Company</th>
               <th style={th}>Order Recv No</th>
               <th style={th}>PI Number</th>
@@ -118,6 +135,17 @@ const PendingApprovalsSection = ({ incentives, leads, incMap, userRole, userName
               const lead = leadMap[inc.enquiryCode];
               const needsAdminApproval = !inc.adminApproved;
               const needsCeoApproval = !inc.ceoApproved;
+              const team = getTeamForInc(inc);
+              const teamLabel =
+                team === 'sql_closure'
+                  ? 'SQL Closure'
+                  : team === 'inbound'
+                  ? 'Inbound'
+                  : team === 'outbound'
+                  ? 'Outbound'
+                  : team === 'prospector'
+                  ? 'Prospector'
+                  : '—';
 
               return (
                 <tr key={inc._id} style={{ borderBottom: '1px solid #f0f0f0' }}>
@@ -126,6 +154,7 @@ const PendingApprovalsSection = ({ incentives, leads, incMap, userRole, userName
                     <FiUser size={14} style={{ color: '#6c757d' }} />
                     <span style={{ fontWeight: 600 }}>{inc.agentName}</span>
                   </td>
+                  <td style={{ ...td, whiteSpace: 'nowrap' }}>{teamLabel}</td>
                   <td style={td}>{inc.clientCompanyName || '—'}</td>
                   
                   {/* Operations Data */}
@@ -512,8 +541,28 @@ const Dashboard = () => {
     earningsBreakdown[i.enquiryCode].total += i.amount;
   });
 
+  // Team PO incentives (for CEO team view)
+  const allPoIncentives = quarterlyData?.po_incentives || [];
+  const teamPoIncentivesSqlClosure = allPoIncentives.filter(
+    (inc) => getTeamForInc(inc) === 'sql_closure'
+  );
+  const teamPoIncentivesInboundOutbound = allPoIncentives.filter((inc) => {
+    const team = getTeamForInc(inc);
+    return team === 'inbound' || team === 'outbound' || team === 'prospector';
+  });
+
+  // Pending approvals (for Admin/CEO views) — grouped strictly by incentive_role
+  const allPendingApprovals = quarterlyData?.pending_approvals || [];
+  const pendingSqlClosureTeam = allPendingApprovals.filter(
+    (inc) => getTeamForInc(inc) === 'sql_closure'
+  );
+  const pendingInboundOutbound = allPendingApprovals.filter((inc) => {
+    const team = getTeamForInc(inc);
+    return team === 'inbound' || team === 'outbound' || team === 'prospector';
+  });
+
   return (
-    <div style={{ height: '100vh', overflow: 'hidden', background: '#f5f6fa', display: 'flex', flexDirection: 'column' }}>
+    <div style={{ height: '100vh', overflow: 'auto', background: '#f5f6fa', display: 'flex', flexDirection: 'column' }}>
       {/* Target Management Modal */}
       <TargetManagementModal
         isOpen={showTargetModal}
@@ -588,7 +637,26 @@ const Dashboard = () => {
         </div>
       </div>
 
-      <div style={{ padding: '12px 20px', flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', maxWidth: 1600, margin: '0 auto', width: '100%' }}>
+      {/* ── Admin (Pushpalata) wide pending approvals table ─ */}
+      {isAdmin && !isCEO && !viewedUser && (
+        <div style={{ padding: '0 16px 12px', maxWidth: 1600, margin: '0 auto', width: '100%' }}>
+          <PendingApprovalsSection
+            title={`🔵 Leads Pending Admin Review (Other Users) — ${selectedYear} ${selectedQuarter}`}
+            incentives={allPendingApprovals.filter(
+              inc => (inc.agentName || '').toLowerCase().trim() !== 'pushpalata'
+            )}
+            leads={leads}
+            incMap={incMap}
+            userRole={role}
+            userName={currentAgentName}
+            isCEO={isCEO}
+            onApproval={handleApproval}
+            onViewDetail={openDetail}
+          />
+        </div>
+      )}
+
+      <div style={{ padding: '8px 16px', flex: 1, display: 'flex', flexDirection: 'column', overflowY: 'visible', maxWidth: 1600, margin: '0 auto', width: '100%' }}>
         {/* ── Quarter Selection Dropdown ── */}
         <div style={{
           background: '#fff',
@@ -859,7 +927,7 @@ const Dashboard = () => {
           )}
 
           {/* 🔹 RIGHT COLUMN — PO INCENTIVE TABLE (Block B) */}
-          <div style={{ flex: viewedIsCEO ? '1 1 100%' : '1 1 35%', minWidth: 400, width: viewedIsCEO ? '100%' : 'auto', overflowY: 'auto', paddingRight: 8, paddingBottom: 20, display: 'flex', flexDirection: 'column', gap: 16 }}>
+          <div style={{ flex: viewedIsCEO ? '1 1 100%' : '1 1 35%', minWidth: 400, width: viewedIsCEO ? '100%' : 'auto', overflowY: 'visible', paddingRight: 8, paddingBottom: 16, display: 'flex', flexDirection: 'column', gap: 10 }}>
             {/* ── Admin personal PO incentives (her own closures) — only show when viewing own dashboard ── */}
             {isAdmin && !isCEO && !viewedUser && (
               <Section title={`📋 Pushpalata’s Closed PO Leads — ${selectedYear} ${selectedQuarter}`}>
@@ -879,30 +947,75 @@ const Dashboard = () => {
               </Section>
             )}
 
-            {/* ── Admin Dashboard: Leads Pending Admin Review (Table 2) ── */}
-            {isAdmin && !isCEO && !viewedUser && (
-              <PendingApprovalsSection
-                title={`🔵 Leads Pending Admin Review (Other Users) — ${selectedYear} ${selectedQuarter}`}
-                incentives={(quarterlyData?.pending_approvals || []).filter(
-                  inc => (inc.agentName || '').toLowerCase().trim() !== 'pushpalata'
-                )}
-                leads={leads}
-                incMap={incMap}
-                userRole={role}
-                userName={currentAgentName}
-                isCEO={isCEO}
-                onApproval={handleApproval}
-                onViewDetail={openDetail}
-              />
+            {/* (Admin Pushpalata pending approvals table moved to full-width below) */}
+
+            {/* ── CEO Dashboard: Team PO Incentives at top, split by team ─ */}
+            {isCEO && !viewedUser && (
+              <>
+                <Section title={`🔵 SQL Closure Team — PO Incentives (₹1,000/PO) — ${selectedYear} ${selectedQuarter}`}>
+                  <IncentiveTable
+                    leads={leads.filter(l => l.poDate)}
+                    incentives={teamPoIncentivesSqlClosure}
+                    incMap={incMap}
+                    type="CLOSURE"
+                    isAdmin={isAdmin}
+                    role={viewedRole}
+                    onApproval={handleApproval}
+                    onViewDetail={openDetail}
+                    showOwner={true}
+                  />
+                </Section>
+                <Section title={`🟢 Inbound / Outbound / Prospector — PO Incentives (₹1,000/PO) — ${selectedYear} ${selectedQuarter}`}>
+                  <IncentiveTable
+                    leads={leads.filter(l => l.poDate)}
+                    incentives={teamPoIncentivesInboundOutbound}
+                    incMap={incMap}
+                    type="CLOSURE"
+                    isAdmin={isAdmin}
+                    role={viewedRole}
+                    onApproval={handleApproval}
+                    onViewDetail={openDetail}
+                    showOwner={true}
+                  />
+                </Section>
+              </>
+            )}
+
+            {/* ── CEO Dashboard: Pending Approvals by Team ─ */}
+            {isCEO && !viewedUser && (
+              <>
+                <PendingApprovalsSection
+                  title={`🔴 SQL Closure Team — Pending Approvals (${pendingSqlClosureTeam.length})`}
+                  incentives={pendingSqlClosureTeam}
+                  leads={leads}
+                  incMap={incMap}
+                  userRole={role}
+                  userName={currentAgentName}
+                  isCEO={isCEO}
+                  onApproval={handleApproval}
+                  onViewDetail={openDetail}
+                />
+                <PendingApprovalsSection
+                  title={`🟢 Inbound / Outbound / Prospector — Pending Approvals (${pendingInboundOutbound.length})`}
+                  incentives={pendingInboundOutbound}
+                  leads={leads}
+                  incMap={incMap}
+                  userRole={role}
+                  userName={currentAgentName}
+                  isCEO={isCEO}
+                  onApproval={handleApproval}
+                  onViewDetail={openDetail}
+                />
+              </>
             )}
 
             {/* ── All Agents View PO Incentives ── */}
             {/* For agents context: show their own PO incentives
             For Admin viewing another user: show that user's PO incentives
             For Admin viewing own dashboard: hide (already shown in admin personal section above)
-            For CEO: show PO incentives */}
-            {((viewedRole !== 'admin') || (viewedRole === 'admin' && viewedUser) || (isCEO && !viewedUser)) && (
-              <Section title={(isCEO && !viewedUser) ? `🔵 Team PO Incentives (₹1,000/PO) — ${selectedYear} ${selectedQuarter}` : `📋 Your PO Incentives (₹1,000 per PO) — ${selectedYear} ${selectedQuarter}`}>
+            For CEO: show PO incentives (handled above) */}
+            {((viewedRole !== 'admin') || (viewedRole === 'admin' && viewedUser)) && !(isCEO && !viewedUser) && (
+              <Section title={`📋 Your PO Incentives (₹1,000 per PO) — ${selectedYear} ${selectedQuarter}`}>
                 <IncentiveTable
                   leads={leads.filter(l => l.poDate)}
                   incentives={quarterlyData?.po_incentives || null}
@@ -918,11 +1031,11 @@ const Dashboard = () => {
             )}
 
 
-            {/* ── Prospector View ── */}
-            {/* For Prospector role: show only their own SQL/PO Conversion incentives
+            {/* ── Prospector / Inbound / Outbound View ── */}
+            {/* For Prospector, Inbound, Outbound: show SQL / PO Conversion incentives
             For Admin (Pushpalata): show Prospector team incentives if not SQL Closure team member
-            For CEO: hide this section (CEO sees SQL Closure approvals instead) */}
-            {((['prospector', 'inbound', 'outbound', 'sql_closure'].includes(viewedRole)) || (viewedRole === 'admin' && !viewedIsSQLClosureTeamMember && !isCEO)) && (
+            SQL Closure team members see only PO closure incentives, not SQL incentives */}
+            {((['prospector', 'inbound', 'outbound'].includes(viewedRole)) || (viewedRole === 'admin' && !viewedIsSQLClosureTeamMember && !isCEO)) && (
               <Section title={viewedIsCEO ? `🟢 Prospector Team — SQL & PO Conversion Incentives — ${selectedYear} ${selectedQuarter}` : `📋 Your SQL Incentives — ${selectedYear} ${selectedQuarter}`}>
                 <ProspectorTable
                   leads={quarterlyData?.prospector_leads || leads.filter(l => l.sqlDate)}
@@ -998,7 +1111,7 @@ const Dashboard = () => {
 /* ═══════ SUB COMPONENTS ═══════ */
 
 const Section = ({ title, children }) => (
-  <div style={{ marginBottom: 12 }}>
+  <div style={{ marginBottom: 8 }}>
     <h2 style={{ fontSize: 14, fontWeight: 700, color: '#1a1a2e', marginBottom: 8 }}>{title}</h2>
     <div style={{ background: '#fff', borderRadius: 12, boxShadow: '0 2px 8px rgba(0,0,0,0.04)', overflow: 'hidden' }}>{children}</div>
   </div>
@@ -1341,30 +1454,44 @@ const LeadDetailContent = ({ data, role }) => {
       {/* Lead Info */}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 20 }}>
         {[
-          ['Enquiry Code', lead.enquiryCode],
-          ['Client Company', lead.clientCompanyName],
-          ['Client Person', lead.clientPersonName],
-          ['Contact', lead.clientNumber],
-          ['Email', lead.clientEmail],
-          ['Industry', lead.industry],
-          ['Product', lead.product],
-          ['Size', lead.size],
-          ['Location', lead.location],
-          ['Lead Source', lead.leadSource],
-          ['Lead Owner', lead.leadOwner],
-          ['Sales Owner', lead.salesOwner],
-          ['Status', lead.status],
-          ['SQL Date', fmtDate(lead.sqlDate)],
-          ['PO Date', fmtDate(lead.poDate)],
-          ['PO Number', lead.poNumber],
-          ['PO Value', lead.poValue ? fmt(lead.poValue) : '—'],
-          ['Lead Type', lead.leadType],
-          ['Quantity', lead.quantity],
-          ['Order Number', lead.orderNumber],
-        ].filter(([, v]) => v && v !== '—').map(([label, val]) => (
+          ['Enquiry Code', lead.enquiryCode || 'Not Available'],
+          ['Client Company', lead.clientCompanyName || 'Not Available'],
+          ['Client Person', lead.clientPersonName || 'Not Available'],
+          ['Contact', lead.clientNumber || 'Not Available'],
+          ['Email', lead.clientEmail || 'Not Available'],
+          ['Industry', lead.industry || 'Not Available'],
+          ['Product', lead.product || 'Not Available'],
+          ['Size', lead.size || 'Not Available'],
+          ['Location', lead.location || 'Not Available'],
+          ['Lead Source', lead.leadSource || 'Not Available'],
+          ['Lead Owner', lead.leadOwner || 'Not Available'],
+          ['Sales Owner', lead.salesOwner || 'Not Available'],
+          ['Status', lead.status || 'Not Available'],
+          ['SQL Date', lead.sqlDate ? fmtDate(lead.sqlDate) : 'Not Available'],
+          ['PO Date', lead.poDate ? fmtDate(lead.poDate) : 'Not Available'],
+          ['PO Number', lead.poNumber || 'Not Available'],
+          ['PO Value', lead.poValue != null ? fmt(lead.poValue) : 'Not Available'],
+          ['Order Received Number', lead.orderReceivedNumber || 'Not Available'],
+          ['PI Number', lead.piNumber || 'Not Available'],
+          ['Proforma Invoice Amount - Received', lead.proformaInvoiceAmountReceived || 'Not Available'],
+          ['Second Payment', lead.secondPayment || 'Not Available'],
+          ['Amount Balance', lead.amountBalance || 'Not Available'],
+          ['Order Type', lead.orderType || 'Not Available'],
+          ['PI Raised Date', lead.piRaisedDate || 'Not Available'],
+          ['PI Link', lead.piLink || 'Not Available'],
+          ['Lead Type', lead.leadType || 'Not Available'],
+          ['Quantity', lead.quantity != null ? lead.quantity : 'Not Available'],
+          ['Order Number', lead.orderNumber || 'Not Available'],
+        ].map(([label, val]) => (
           <div key={label} style={{ fontSize: 13 }}>
             <span style={{ color: '#6c757d' }}>{label}: </span>
-            <span style={{ fontWeight: 600 }}>{val}</span>
+            {label === 'PI Link' && val && val !== 'Not Available' ? (
+              <a href={val} target="_blank" rel="noreferrer" style={{ fontWeight: 600, color: '#6c5ce7' }}>
+                Open PI
+              </a>
+            ) : (
+              <span style={{ fontWeight: 600 }}>{val}</span>
+            )}
           </div>
         ))}
       </div>

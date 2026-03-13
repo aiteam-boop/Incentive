@@ -582,7 +582,9 @@ router.get('/dashboard', authenticate, async (req, res) => {
         incentiveQuery.enquiryCode = { $in: enquiryCodes };
       }
 
-      let poIncentiveRecords = await IncentiveLedger.find(incentiveQuery).sort({ createdAt: -1 });
+      let poIncentiveRecords = await IncentiveLedger.find(incentiveQuery)
+        .populate('userId', 'agentName incentive_role')
+        .sort({ createdAt: -1 });
 
       // Ensure we have lead data for all incentives (especially for Pushpalata's own incentives)
       // If an incentive doesn't have a matching lead in poLeads, we still want to include it
@@ -785,7 +787,7 @@ router.get('/dashboard', authenticate, async (req, res) => {
         ],
         ...getIncentiveDateFilter(),
       })
-        .populate('userId', 'agentName')
+        .populate('userId', 'agentName incentive_role')
         .sort({ createdAt: -1 })
         .limit(50); // Limit to recent 50
 
