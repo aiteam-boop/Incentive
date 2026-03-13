@@ -513,6 +513,29 @@ router.get('/lead-details/:enquiryCode', authenticate, async (req, res) => {
       return res.status(403).json({ success: false, message: 'Access denied' });
     }
 
+    // Fetch operations data (stage 1 + stage 6) for PI / payment info
+    const opsDb = await getOperationsDb();
+    const stage1Doc = await opsDb.collection('stage1_data').findOne({
+      'Sales Enquiry Code': req.params.enquiryCode,
+    });
+
+    let stage6Doc = null;
+    if (stage1Doc && stage1Doc['Order Received Number']) {
+      stage6Doc = await opsDb.collection('stage6_data').findOne({
+        'Order Received Number': stage1Doc['Order Received Number'],
+      });
+    }
+
+    const orderReceivedNumber = stage1Doc ? stage1Doc['Order Received Number'] : null;
+    const piNumber = stage6Doc ? stage6Doc['PI_number'] : null;
+    const piLink = stage6Doc ? stage6Doc['PI_link'] : null;
+    const piRaisedDate = stage6Doc ? stage6Doc['PI Raised date'] : null;
+    const proformaInvoiceAmountReceived = stage6Doc ? stage6Doc['Proforma Invoice Amount - Received'] : null;
+    const secondPayment = stage6Doc ? stage6Doc['second_payment'] : null;
+    const amountBalance =
+      stage6Doc && (stage6Doc['amount_balance'] != null ? stage6Doc['amount_balance'] : stage6Doc['balance_to_receive_stage6.1']);
+    const orderType = stage6Doc ? stage6Doc['order type'] : null;
+
     // Get remarks from sales_remark_form
     const remarks = await getRemarks(req.params.enquiryCode);
 
@@ -549,6 +572,14 @@ router.get('/lead-details/:enquiryCode', authenticate, async (req, res) => {
         expectedClosure: lead['Expected_Closure'],
         lostDate: lead['Lost_Date'],
         orderNumber: lead['Order _Number'],
+        orderReceivedNumber,
+        piNumber,
+        piLink,
+        piRaisedDate,
+        proformaInvoiceAmountReceived,
+        secondPayment,
+        amountBalance,
+        orderType,
         srf: lead['SRF_PDF_Link'],
         quotation: lead['Quotation_Link'],
         remarks: lead['Remarks'],
